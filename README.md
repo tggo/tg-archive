@@ -20,9 +20,10 @@ live: Ruslan · chats watched: 353
 ```markdown
 ## 2026-08-19
 
-**14:32** · **Anna** ↳ replying to «are you around tomorrow?»: yes, after 6
-**14:33** · **me** [voice 12s]
+**14:32** · **Anna** ↳ replying to “are you around tomorrow?”: yes, after 6
+**14:33** · **me** [voice 12s] 👍
 **14:41** · **Anna** (edited): make it 7, actually
+**14:44** · **me** ![[attachments/anna-smith-428424641/356701.jpg]]
 ```
 
 ## Why it is built this way
@@ -32,6 +33,10 @@ live: Ruslan · chats watched: 353
 and deletions honest — an edited message updates in place and gets `(edited)`, a deleted
 one is kept and marked, and `tg-archive rerender` rebuilds the entire archive without
 touching Telegram again. Append-only writers cannot do any of that.
+
+It also means search is a database query rather than a grep over files, that attachments
+can be fetched long after the text, and that reactions can be attached to a message that
+was archived months ago — all without re-reading anything from Telegram.
 
 One file per chat per month, atomically replaced, so Obsidian never sees a half-written
 file:
@@ -55,7 +60,23 @@ The binary is universal (arm64 + x86_64) and signed with a Developer ID, but **n
 notarized by Apple**. Homebrew does not quarantine what it installs, so it runs as-is; a
 browser download would be gated until a notarized build ships.
 
-Or build from source (Go 1.24+):
+### Linux
+
+There is no Homebrew formula for Linux, but the same binary is built for it — handy for
+running `live` on a server:
+
+```bash
+curl -LO https://github.com/tggo/tg-archive/releases/latest/download/tg-archive_0.2.0_linux_amd64.tar.gz
+tar -xzf tg-archive_0.2.0_linux_amd64.tar.gz
+sudo install tg-archive /usr/local/bin/
+```
+
+Replace `amd64` with `arm64` on ARM machines. Code signing is a macOS concern, so the Linux
+builds are plain binaries — verify them against the published `.sha256` if you care.
+
+### From source
+
+Go 1.24+, no C toolchain needed (the SQLite driver is pure Go):
 
 ```bash
 go install github.com/tggo/tg-archive/cmd/tg-archive@latest
@@ -238,6 +259,11 @@ launchctl load ~/Library/LaunchAgents/com.tggo.tg-archive.plist
   accounts for that, and the ban takes your archive's access with it.
 - Bots and broadcast channels are off by default; enable them in the config if you want
   the noise.
+
+## Contributing
+
+[CONTRIBUTING.md](CONTRIBUTING.md) for the workflow, [CLAUDE.md](CLAUDE.md) for the design
+rule and the Telegram quirks the code works around.
 
 ## License
 

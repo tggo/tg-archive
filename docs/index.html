@@ -33,7 +33,7 @@
 <div class="sample">
 <span class="dim">## 2026-08-19</span><br>
 <b>14:32</b> · <b>Anna</b> ↳ replying to “are you around tomorrow?”: yes, after 6<br>
-<b>14:33</b> · <b>me</b> [voice 12s]<br>
+<b>14:33</b> · <b>me</b> [voice 12s] 👍<br>
 <b>14:41</b> · <b>Anna</b> (edited): make it 7, actually
 </div>
 
@@ -58,6 +58,15 @@ messages. It is not scraping anyone else's data.</div>
 <pre><code>tg-archive version</code></pre>
 <div class="note"><b>“command not found”?</b> Close the Terminal window and open a new one —
 Homebrew adds itself to your <code>PATH</code> only for new sessions.</div>
+<details><summary>On Linux instead?</summary>
+<p>Homebrew is a Mac thing, but the same program is built for Linux — useful for keeping
+the archive current on a server:</p>
+<pre><code>curl -LO https://github.com/tggo/tg-archive/releases/latest/download/tg-archive_0.2.0_linux_amd64.tar.gz
+tar -xzf tg-archive_0.2.0_linux_amd64.tar.gz
+sudo install tg-archive /usr/local/bin/</code></pre>
+<p>Use <code>arm64</code> instead of <code>amd64</code> on ARM machines. Everything below
+works the same, except <code>brew services</code> — run <code>tg-archive live</code> under
+systemd or in a container.</p></details>
 </div></div>
 
 <h2 id="keys">Part 2 — Get your API keys</h2>

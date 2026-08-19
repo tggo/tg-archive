@@ -16,12 +16,9 @@ export NOTARY_PROFILE=tg-archive-notary   # see build/notary-setup.md
 That produces a universal, signed, notarized binary plus the tarball and sha256 that the
 Homebrew formula points at.
 
-## Design rules worth keeping
+## Before you change anything
 
-- **SQLite is the source of truth.** Anything that renders Markdown must be able to run
-  again from scratch and produce the same files. Never write to `.md` without going
-  through the database first.
-- **Markdown writes are atomic** (`.tmp` + rename) so a watching editor never reads a
-  partial file.
-- **Chat ids are Telethon-marked** (`user > 0`, `chat = -id`, `channel = -100…`) so the
-  database stays interchangeable with Telethon-based tools.
+Read [CLAUDE.md](CLAUDE.md). It holds the design rule everything follows (SQLite is the
+source of truth, Markdown is a projection) and the facts about Telegram and Go that shaped
+this code — each of which cost real time to discover, and each of which looks like a
+pointless complication until you hit it yourself.

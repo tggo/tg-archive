@@ -33,7 +33,7 @@
 <div class="sample">
 <span class="dim">## 2026-08-19</span><br>
 <b>14:32</b> · <b>Анна</b> ↳ replying to “ти завтра будеш?”: так, після шостої<br>
-<b>14:33</b> · <b>me</b> [voice 12s]<br>
+<b>14:33</b> · <b>me</b> [voice 12s] 👍<br>
 <b>14:41</b> · <b>Анна</b> (edited): краще о сьомій
 </div>
 
@@ -58,6 +58,15 @@
 <pre><code>tg-archive version</code></pre>
 <div class="note"><b>Пише «command not found»?</b> Закрий вікно Термінала і відкрий нове —
 Homebrew прописує себе в <code>PATH</code> лише для нових сесій.</div>
+<details><summary>А якщо Linux?</summary>
+<p>Homebrew — це для Mac, але та сама програма збирається й під Linux: зручно тримати
+архів свіжим на сервері.</p>
+<pre><code>curl -LO https://github.com/tggo/tg-archive/releases/latest/download/tg-archive_0.2.0_linux_amd64.tar.gz
+tar -xzf tg-archive_0.2.0_linux_amd64.tar.gz
+sudo install tg-archive /usr/local/bin/</code></pre>
+<p>На ARM-машинах бери <code>arm64</code> замість <code>amd64</code>. Далі все однаково,
+крім <code>brew services</code> — запускай <code>tg-archive live</code> через systemd або
+в контейнері.</p></details>
 </div></div>
 
 <h2 id="keys">Частина 2 — Отримати ключі</h2>
