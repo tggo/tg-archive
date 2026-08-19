@@ -2,8 +2,9 @@
 
 Archive **your own** Telegram into plain Markdown, near real-time. Reply from the CLI.
 
-**New here? Start with the [step-by-step guide](https://tggo.github.io/tg-archive/)** —
-it walks through Homebrew, getting your Telegram API keys, and the first run, assuming no
+**New here? Start with the step-by-step guide** —
+[English](https://tggo.github.io/tg-archive/) · [Українською](https://tggo.github.io/tg-archive/uk/).
+It walks through Homebrew, getting your Telegram API keys, and the first run, assuming no
 terminal experience.
 
 Telegram's MTProto API is open and your messages are your data — this is a normal user

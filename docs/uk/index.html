@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tg-archive — твій Telegram у звичайних Markdown-файлах</title>
+<meta name="description" content="Покрокова інструкція: як зберігати власне листування Telegram у Markdown на своєму Mac і дати Клоду читати й писати в Telegram через MCP.">
+<link rel="alternate" hreflang="en" href="https://tggo.github.io/tg-archive/">
+<link rel="alternate" hreflang="uk" href="https://tggo.github.io/tg-archive/uk/">
+<link rel="stylesheet" href="../style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🗂️</text></svg>">
+</head>
+<body>
+<nav class="langs"><a href="../">EN</a><a aria-current="page" href="./">UA</a></nav>
+
+<header>
+  <div class="wrap">
+    <span class="tag">macOS · відкритий код · MIT</span>
+    <h1>Твій Telegram — звичайними файлами</h1>
+    <p class="lede">tg-archive тримає копію твого листування на твоєму ж диску: читається
+    будь-яким редактором, шукається, оновлюється за секунди після нового повідомлення.
+    Клод теж уміє з ним працювати.</p>
+    <div class="cta">
+      <a class="btn btn-1" href="#install">Встановити за 5 хвилин</a>
+      <a class="btn btn-2" href="https://github.com/tggo/tg-archive">Код на GitHub</a>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+<p>Ось що лягає на диск — один файл на чат за місяць:</p>
+<div class="sample">
+<span class="dim">## 2026-08-19</span><br>
+<b>14:32</b> · <b>Анна</b> ↳ replying to “ти завтра будеш?”: так, після шостої<br>
+<b>14:33</b> · <b>me</b> [voice 12s]<br>
+<b>14:41</b> · <b>Анна</b> (edited): краще о сьомій
+</div>
+
+<div class="note"><b>Це законно?</b> Так. Telegram публікує той самий протокол, яким
+користуються його власні застосунки, а це звичайний клієнт, який заходить під тобою, на
+твій акаунт, і читає твої ж повідомлення. Чужих даних він не збирає.</div>
+
+<h2 id="install">Частина 1 — Встановлення</h2>
+
+<div class="step"><div class="num">1</div><div class="step-body">
+<h3>Постав Homebrew, якщо його ще немає</h3>
+<p>Homebrew — це «магазин» програм для командного рядка на Mac. Відкрий <b>Термінал</b>
+(натисни <code>⌘ Пробіл</code>, набери «Terminal», Enter) і встав:</p>
+<pre><code>/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"</code></pre>
+<p>Уже є? Переходь до кроку 2. Перевірити: <code>brew --version</code>.</p>
+</div></div>
+
+<div class="step"><div class="num">2</div><div class="step-body">
+<h3>Встанови tg-archive</h3>
+<pre><code>brew install tggo/tap/tg-archive</code></pre>
+<p>Перевір, що поставилось:</p>
+<pre><code>tg-archive version</code></pre>
+<div class="note"><b>Пише «command not found»?</b> Закрий вікно Термінала і відкрий нове —
+Homebrew прописує себе в <code>PATH</code> лише для нових сесій.</div>
+</div></div>
+
+<h2 id="keys">Частина 2 — Отримати ключі</h2>
+
+<p>Telegram видає ключі доступу <b>на кожен акаунт окремо</b>. Будь-якому клієнту потрібна
+своя пара, і твоя нікуди не передається — навіть авторам цієї програми. Це дві хвилини.</p>
+
+<div class="step"><div class="num">1</div><div class="step-body">
+<h3>Відкрий my.telegram.org</h3>
+<p>Зайди на <a href="https://my.telegram.org" target="_blank" rel="noopener">my.telegram.org</a>
+і введи номер у міжнародному форматі, з кодом країни: <code>+380671234567</code>.</p>
+</div></div>
+
+<div class="step"><div class="num">2</div><div class="step-body">
+<h3>Код прийде в сам Telegram</h3>
+<p>Це <b>не SMS</b>. Код приходить повідомленням усередині Telegram, у чат під назвою
+<b>Telegram</b> — відкрий застосунок на телефоні чи компʼютері й подивись там.</p>
+<div class="note warn"><b>Нікому не давай цей код.</b> Підтримка Telegram ніколи його не
+просить, а хто просить — забирає акаунт. Тут ти вводиш його на власному сайті Telegram,
+і це єдине місце, де він доречний.</div>
+</div></div>
+
+<div class="step"><div class="num">3</div><div class="step-body">
+<h3>API development tools → створити застосунок</h3>
+<p>Після входу натисни <b>API development tools</b> і заповни коротку форму:</p>
+<table>
+<tr><th>Поле</th><th>Що вписати</th></tr>
+<tr><td>App title</td><td><code>tg-archive</code> — будь-яка назва, її бачиш лише ти</td></tr>
+<tr><td>Short name</td><td><code>tgarchive</code></td></tr>
+<tr><td>URL</td><td>лишити порожнім</td></tr>
+<tr><td>Platform</td><td>Desktop</td></tr>
+<tr><td>Description</td><td>лишити порожнім</td></tr>
+</table>
+<p>Тисни <b>Create application</b> — на наступній сторінці буде два значення:</p>
+<table>
+<tr><th>Значення</th><th>Має вигляд</th></tr>
+<tr><td><code>api_id</code></td><td>число, наприклад <code>2040815</code></td></tr>
+<tr><td><code>api_hash</code></td><td>32 символи з літер і цифр</td></tr>
+</table>
+<div class="note warn"><b>Стався до api_hash як до пароля.</b> Не викладай його в issue,
+скріншотах чи чатах. Якщо витік — просто створи новий застосунок.</div>
+</div></div>
+
+<h2 id="first-run">Частина 3 — Перший запуск</h2>
+
+<div class="step"><div class="num">1</div><div class="step-body">
+<h3>Дай відповіді майстру налаштування</h3>
+<pre><code>tg-archive setup</code></pre>
+<p>Він питає по одному; Enter лишає те, що в дужках:</p>
+<table>
+<tr><th>Питання</th><th>Відповідь</th></tr>
+<tr><td>api_id / api_hash</td><td>встав те, що щойно отримав</td></tr>
+<tr><td>where to write the archive</td><td>Enter → <code>~/TelegramArchive</code>, або свій шлях</td></tr>
+<tr><td>timezone</td><td><code>Europe/Kyiv</code> (або <code>Local</code>)</td></tr>
+<tr><td>private chats / groups / Saved Messages</td><td><code>y</code> — це найцінніше</td></tr>
+<tr><td>channels you follow / bot chats</td><td><code>n</code>, якщо не хочеш шуму</td></tr>
+</table>
+</div></div>
+
+<div class="step"><div class="num">2</div><div class="step-body">
+<h3>Увійди</h3>
+<pre><code>tg-archive login</code></pre>
+<p>Номер телефону, потім код (ще раз: він приходить <b>у Telegram</b>), потім хмарний
+пароль, якщо в тебе увімкнена двоетапна перевірка. Це робиться один раз — сесія
+зберігається на твоєму Mac.</p>
+</div></div>
+
+<div class="step"><div class="num">3</div><div class="step-body">
+<h3>Витягни історію</h3>
+<pre><code>tg-archive backfill</code></pre>
+<p>Він проходить кожен чат від найновішого вглиб. Роки листування тягнуться довго —
+від десятків хвилин до кількох годин, і Telegram час від часу навмисно пригальмовує, а
+програма це спокійно пересиджує. <b>Можна будь-коли зупинити через <code>Ctrl-C</code></b>
+і запустити пізніше — воно продовжить з того ж місця, а не почне спочатку.</p>
+<p>Хочеш спершу спробувати? Візьми по 200 останніх повідомлень з кожного чату:</p>
+<pre><code>tg-archive backfill --limit 200</code></pre>
+</div></div>
+
+<div class="step"><div class="num">4</div><div class="step-body">
+<h3>Тримай архів свіжим</h3>
+<p>Запусти фоновою службою — нові повідомлення падатимуть в архів за секунди:</p>
+<pre><code>brew services start tggo/tap/tg-archive</code></pre>
+<p>Або просто у вікні, щоб бачити, що діється:</p>
+<pre><code>tg-archive live</code></pre>
+</div></div>
+
+<h2 id="files">Що ти отримуєш</h2>
+
+<pre><code>~/TelegramArchive/
+├── index.md                      <span class="c">← таблиця всіх чатів</span>
+└── chats/
+    └── anna-smith-428424641/
+        ├── 2017-05.md
+        └── 2026-08.md            <span class="c">← один файл на місяць</span></code></pre>
+
+<p>Наведи <a href="https://obsidian.md" target="_blank" rel="noopener">Obsidian</a> на цю
+теку — і листування стає блокнотом з пошуком і зв'язками. Або користуйся Spotlight,
+<code>grep</code>, будь-яким редактором: це звичайні текстові файли.</p>
+
+<h3>Чому редагування й видалення відображаються чесно</h3>
+<p>Повідомлення спершу лягають у невелику базу, а Markdown малюється з неї. Тому коли
+співрозмовник редагує повідомлення — архів оновлює той самий рядок і ставить
+<code>(edited)</code>; коли видаляє — архів лишає його і позначає <code>(DELETED)</code>.
+Усі файли можна перебудувати будь-коли, навіть без інтернету:</p>
+<pre><code>tg-archive rerender</code></pre>
+
+<div class="note"><b>Медіа не завантажується.</b> Від фото, файлів і голосових лишається
+позначка на кшталт <code>[voice 12s]</code> чи <code>[file zvit.pdf 2.1MB]</code>. Завдяки
+цьому роки листування важать десятки мегабайтів, а не сотні гігабайтів.</div>
+
+<h2 id="claude">Частина 4 — Підключити до Клода</h2>
+
+<p>Та сама програма вміє працювати <b>MCP-сервером</b> — так Клод під'єднується до
+інструментів на твоїй машині. Одна команда:</p>
+<pre><code>claude mcp add tg-archive -- tg-archive mcp</code></pre>
+
+<p>Далі можна питати «що Анна писала про поїздку в червні?» або «знайди всі повідомлення,
+де мені надсилали адресу». Клод читає локальний архів, тому відповідає миттєво і працює
+навіть без мережі.</p>
+
+<h3>Якщо хочеш, щоб Клод ще й писав</h3>
+<pre><code>claude mcp add tg-archive -- tg-archive mcp --allow-send</code></pre>
+<div class="note warn"><b>Подумай, перш ніж вмикати.</b> Інструмент, який може написати
+твоїм контактам, — це зовсім інший рівень ризику, ніж той, що читає локальний файл.
+Надсилання вимкнене, поки не додаси цей прапорець, і позначене так, щоб Клод перепитував
+перед відправкою.</div>
+
+<table>
+<tr><th>Що вміє Клод</th><th>Звідки бере дані</th></tr>
+<tr><td><code>list_chats</code>, <code>read_chat</code>, <code>search_messages</code>, <code>archive_status</code></td><td>локальний архів — миттєво, без мережі</td></tr>
+<tr><td><code>sync_chat</code></td><td>Telegram, щоб дотягнути свіже</td></tr>
+<tr><td><code>send_message</code></td><td>Telegram — лише з <code>--allow-send</code></td></tr>
+</table>
+
+<h2 id="commands">Шпаргалка команд</h2>
+<table>
+<tr><th>Команда</th><th>Що робить</th></tr>
+<tr><td><code>tg-archive setup</code></td><td>Перепройти налаштування</td></tr>
+<tr><td><code>tg-archive login</code></td><td>Увійти в Telegram</td></tr>
+<tr><td><code>tg-archive chats</code></td><td>Показати чати та їх id</td></tr>
+<tr><td><code>tg-archive backfill</code></td><td>Витягти історію (можна переривати)</td></tr>
+<tr><td><code>tg-archive live</code></td><td>Стежити за новими повідомленнями</td></tr>
+<tr><td><code>tg-archive status</code></td><td>Скільки вже в архіві</td></tr>
+<tr><td><code>tg-archive send --chat "Анна" --text "вже їду"</code></td><td>Надіслати повідомлення</td></tr>
+<tr><td><code>tg-archive rerender</code></td><td>Перебудувати всі файли з бази</td></tr>
+<tr><td><code>tg-archive mcp</code></td><td>Віддати архів Клоду</td></tr>
+</table>
+
+<h2 id="trouble">Коли щось пішло не так</h2>
+
+<details><summary>«no config … run `tg-archive setup`»</summary>
+<p>Ти пропустив частину 3 або запускаєш під іншим користувачем, ніж налаштовував. Виконай
+<code>tg-archive setup</code>.</p></details>
+
+<details><summary>macOS каже, що програму «неможливо відкрити» / невідомий розробник</summary>
+<p>Встановлення через Homebrew цього уникає — Homebrew не вішає на завантажене позначку
+карантину. Якщо ж ти качав архів браузером, macOS триматиме його, доки збірку не
+нотарізують в Apple. Використовуй <code>brew install tggo/tap/tg-archive</code>.</p></details>
+
+<details><summary>Код для входу не приходить</summary>
+<p>Він надсилається <b>всередину Telegram</b>, а не по SMS — відкрий застосунок і знайди
+чат <b>Telegram</b>. Якщо ти скрізь вийшов з акаунта, Telegram переходить на SMS, і воно
+може йти кілька хвилин.</p></details>
+
+<details><summary>Після коду просить якийсь пароль</summary>
+<p>Це двоетапна перевірка («хмарний пароль»), яку ти колись увімкнув у Telegram. Це не код
+з повідомлення і не пароль від телефона. Забув — скинути можна в Telegram:
+Налаштування → Приватність і безпека → Двоетапна перевірка.</p></details>
+
+<details><summary>backfill повільний або зупиняється на кілька хвилин</summary>
+<p>Так і має бути. Telegram обмежує темп запитів історії й просить зачекати; tg-archive
+чекає, замість довбати сервер — саме це тримає акаунт у безпеці. Лиши його працювати або
+зупини й продовж пізніше: прогрес зберігається.</p></details>
+
+<details><summary>Замість назви чату — просто число</summary>
+<p>Той акаунт видалено, і Telegram більше не віддає для нього імені. Повідомлення при
+цьому збережені.</p></details>
+
+<details><summary>Немає моїх секретних чатів</summary>
+<p>Секретні чати наскрізно зашифровані й лежать лише на тих двох пристроях, де їх
+створили. Жоден клієнт їх не експортує — ні цей, ні Telegram Desktop. Тут нема що
+лагодити.</p></details>
+
+<details><summary>Хочу почати з нуля</summary>
+<p>Видали <code>~/.config/tg-archive</code> (налаштування й сесія) і теку архіву, потім
+знову <code>tg-archive setup</code>. Видалення сесії тут не виходить з Telegram на інших
+пристроях; щоб відкликати її з боку Telegram — Налаштування → Пристрої.</p></details>
+
+<h2 id="safety">Чесні застереження</h2>
+<table>
+<tr><th></th><th></th></tr>
+<tr><td><b>Не роби розсилок</b></td><td>Програма заходить під тобою. За масову відправку
+Telegram банить акаунт, а разом з ним зникає й доступ до архіву.</td></tr>
+<tr><td><b>Архів — відкритий текст</b></td><td>Хто має доступ до твого Mac (або до
+бекапів), той його прочитає. Тримай на зашифрованому диску — FileVault закриває
+внутрішній.</td></tr>
+<tr><td><b>Там не лише твої слова</b></td><td>У листуванні є й інші люди. Публікувати це —
+твоє рішення і твоя відповідальність.</td></tr>
+</table>
+
+<footer class="wrap" style="padding:0">
+  <p><a href="https://github.com/tggo/tg-archive">github.com/tggo/tg-archive</a> · MIT ·
+  на базі <a href="https://github.com/gotd/td">gotd</a> ·
+  <a href="https://github.com/tggo/tg-archive/issues">повідомити про проблему</a></p>
+</footer>
+</main>
+
+<script>
+// Кнопки «копіювати» додаються скриптом, щоб без JS сторінка читалася так само.
+document.querySelectorAll('pre').forEach(function (pre) {
+  var b = document.createElement('button');
+  b.className = 'copy';
+  b.textContent = 'копіювати';
+  b.addEventListener('click', function () {
+    navigator.clipboard.writeText(pre.querySelector('code').innerText).then(function () {
+      b.textContent = 'скопійовано';
+      setTimeout(function () { b.textContent = 'копіювати'; }, 1200);
+    });
+  });
+  pre.appendChild(b);
+});
+</script>
+</body>
+</html>
