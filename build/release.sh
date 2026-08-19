@@ -1,22 +1,24 @@
 #!/bin/bash
-# Збирає universal-бінарник, підписує Developer ID, нотарізує в Apple, пакує для Homebrew.
+# Builds a universal binary, signs it with a Developer ID, notarizes it with Apple,
+# and packs the tarball the Homebrew formula points at.
 #
 #   ./build/release.sh v0.1.0
 #
-# Потрібне оточення:
-#   DEVELOPER_ID   — "Developer ID Application: Ім'я (TEAMID)" (за замовчуванням береться з keychain)
-#   NOTARY_PROFILE — профіль notarytool (створюється `xcrun notarytool store-credentials`)
+# Environment:
+#   DEVELOPER_ID   - "Developer ID Application: Name (TEAMID)"; taken from the keychain by default
+#   NOTARY_PROFILE - notarytool profile (see build/notary-setup.md). Missing profile means
+#                    the build is still signed, just not notarized.
 set -euo pipefail
 
-VERSION="${1:?вкажи версію, напр. v0.1.0}"
+VERSION="${1:?pass a version, e.g. v0.1.0}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DIST="$ROOT/dist"
 NAME="tg-archive"
 DEVELOPER_ID="${DEVELOPER_ID:-$(security find-identity -v -p codesigning | awk -F'"' '/Developer ID Application/{print $2; exit}')}"
 NOTARY_PROFILE="${NOTARY_PROFILE:-tg-archive-notary}"
 
-[ -n "$DEVELOPER_ID" ] || { echo "не знайдено Developer ID Application у keychain" >&2; exit 1; }
-echo "==> підпис: $DEVELOPER_ID"
+[ -n "$DEVELOPER_ID" ] || { echo "no Developer ID Application identity in the keychain" >&2; exit 1; }
+echo "==> signing identity: $DEVELOPER_ID"
 
 rm -rf "$DIST"; mkdir -p "$DIST"
 cd "$ROOT"
@@ -40,26 +42,25 @@ codesign --force --options runtime --timestamp \
   "$DIST/$NAME"
 codesign --verify --strict --verbose=2 "$DIST/$NAME"
 
-echo "==> notarize"
-# нотарізують архів, а не голий бінарник
-ditto -c -k --keepParent "$DIST/$NAME" "$DIST/$NAME-notarize.zip"
-if xcrun notarytool submit "$DIST/$NAME-notarize.zip" \
-     --keychain-profile "$NOTARY_PROFILE" --wait; then
-  # stapler не вміє клеїти квиток до голого CLI-бінарника — перевіряємо через spctl,
-  # Gatekeeper однаково спитає Apple онлайн і побачить нотарізацію.
-  echo "==> перевірка Gatekeeper"
+if xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1; then
+  echo "==> notarize"
+  # Apple notarizes an archive, not a bare binary
+  ditto -c -k --keepParent "$DIST/$NAME" "$DIST/$NAME-notarize.zip"
+  xcrun notarytool submit "$DIST/$NAME-notarize.zip" --keychain-profile "$NOTARY_PROFILE" --wait
+  rm "$DIST/$NAME-notarize.zip"
+  # A bare CLI binary cannot carry a stapled ticket; Gatekeeper checks with Apple online.
+  echo "==> Gatekeeper check"
   spctl -a -vvv -t install "$DIST/$NAME" 2>&1 | sed 's/^/    /' || true
 else
-  echo "!! нотарізація не пройшла — див. лог вище" >&2
-  exit 1
+  echo "!! no notary profile \"$NOTARY_PROFILE\" — releasing SIGNED BUT NOT NOTARIZED" >&2
+  echo "   set one up with build/notary-setup.md, then re-run to publish a notarized build" >&2
 fi
-rm "$DIST/$NAME-notarize.zip"
 
-echo "==> tarball для Homebrew"
+echo "==> tarball for Homebrew"
 TAR="$DIST/${NAME}_${VERSION#v}_darwin_universal.tar.gz"
 tar -czf "$TAR" -C "$DIST" "$NAME"
 shasum -a 256 "$TAR" | tee "$TAR.sha256"
 
 echo
-echo "готово: $TAR"
+echo "done: $TAR"
 echo "sha256: $(awk '{print $1}' "$TAR.sha256")"
