@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/tggo/tg-archive/internal/config"
 	"github.com/tggo/tg-archive/internal/mcpserver"
@@ -30,6 +31,11 @@ const usage = `tg-archive %s — Markdown archive of your own Telegram
                                 full history; interrupting it loses no progress
   tg-archive live               daemon: new/edited/deleted → .md within ~3s
   tg-archive send --chat X --text "..." [--reply-to N]
+  tg-archive search "words" [--chat X] [--from D] [--to D]
+                                full-text search over the archive
+  tg-archive media [--chat X] [--limit N]
+                                download attachments for messages that have none yet
+  tg-archive doctor [--fix]     find holes in the archived history (and fill them)
   tg-archive rerender           rebuild every .md from the database
   tg-archive status             what the archive holds right now
   tg-archive mcp [--allow-send] serve the archive to an MCP client over stdio
@@ -37,6 +43,8 @@ const usage = `tg-archive %s — Markdown archive of your own Telegram
   tg-archive import-telethon <StringSession>
                                 carry over a Telethon session instead of logging in again
   tg-archive version
+
+Global: --profile <name> before the command uses a separate account and archive.
 
 Config: %s
 `
@@ -48,6 +56,22 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// --profile comes before the command: tg-archive --profile work backfill
+	if os.Args[1] == "--profile" || strings.HasPrefix(os.Args[1], "--profile=") {
+		name, rest := "", os.Args[2:]
+		if v, ok := strings.CutPrefix(os.Args[1], "--profile="); ok {
+			name = v
+		} else if len(os.Args) > 2 {
+			name, rest = os.Args[2], os.Args[3:]
+		}
+		if name == "" || len(rest) == 0 {
+			fmt.Fprintln(os.Stderr, "usage: tg-archive --profile <name> <command>")
+			os.Exit(2)
+		}
+		config.SetProfile(name)
+		os.Args = append([]string{os.Args[0]}, rest...)
+	}
 
 	var err error
 	switch os.Args[1] {
@@ -67,6 +91,12 @@ func main() {
 		err = cmdRerender()
 	case "status":
 		err = cmdStatus()
+	case "doctor":
+		err = cmdDoctor(ctx)
+	case "media":
+		err = cmdMedia(ctx)
+	case "search":
+		err = cmdSearch()
 	case "mcp":
 		err = cmdMCP(ctx)
 	case "import-telethon":
@@ -132,6 +162,26 @@ You need your own api_id / api_hash (Telegram issues them per account):
 	cfg.Saved = askBool(in, "archive Saved Messages", cfg.Saved)
 	cfg.Channels = askBool(in, "archive channels you follow", cfg.Channels)
 	cfg.Bots = askBool(in, "archive bot chats", cfg.Bots)
+
+	fmt.Print("\ndownload media? none = keep markers like [voice 12s] (smallest archive),\n" +
+		"small = photos and voice notes, all = everything including video\n")
+	if v := ask(in, "media (none/small/all)", cfg.Media); v != "" {
+		switch v {
+		case "none", "small", "all":
+			cfg.Media = v
+		default:
+			return fmt.Errorf("media must be none, small or all")
+		}
+	}
+	if cfg.Media == "small" {
+		if v := ask(in, "size limit in MB", strconv.Itoa(cfg.MediaMaxMB)); v != "" {
+			n, err := strconv.Atoi(v)
+			if err != nil {
+				return fmt.Errorf("size limit must be a number: %w", err)
+			}
+			cfg.MediaMaxMB = n
+		}
+	}
 
 	if err := cfg.Save(); err != nil {
 		return err
@@ -235,6 +285,170 @@ func resolveChat(st *store.Store, q string) (int64, error) {
 		fmt.Fprintf(os.Stderr, "  %16d  %s\n", c.ID, c.Title)
 	}
 	return 0, fmt.Errorf("%d chats matched", len(found))
+}
+
+func cmdDoctor(ctx context.Context) error {
+	fs := flag.NewFlagSet("doctor", flag.ExitOnError)
+	fix := fs.Bool("fix", false, "fetch the missing messages")
+	minJump := fs.Int("min-gap", 50, "ignore id jumps smaller than this")
+	_ = fs.Parse(os.Args[2:])
+
+	cfg, st, err := open()
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+
+	unfinished, err := st.Unfinished()
+	if err != nil {
+		return err
+	}
+	if len(unfinished) > 0 {
+		fmt.Printf("%d chat(s) never walked back to the beginning:\n", len(unfinished))
+		for i, c := range unfinished {
+			if i == 10 {
+				fmt.Printf("  … and %d more\n", len(unfinished)-10)
+				break
+			}
+			fmt.Printf("  %-40s %7d archived, oldest %s\n", trunc(c.Title, 40), c.Count, shortDate(c.Last))
+		}
+		fmt.Print("Run `tg-archive backfill` to continue from where it stopped.\n\n")
+	}
+
+	gaps, err := st.Gaps(*minJump)
+	if err != nil {
+		return err
+	}
+	if len(gaps) == 0 {
+		fmt.Println("No holes found in supergroups or channels.")
+		fmt.Println("(Private chats cannot be checked this way: Telegram numbers their")
+		fmt.Println("messages per account, so id jumps there are normal, not missing data.)")
+		return nil
+	}
+	total := 0
+	for _, g := range gaps {
+		total += g.Missing
+	}
+	fmt.Printf("%d suspicious gap(s), up to %d messages missing:\n\n", len(gaps), total)
+	for i, g := range gaps {
+		if i == 20 && !*fix {
+			fmt.Printf("  … and %d more\n", len(gaps)-20)
+			break
+		}
+		fmt.Printf("  %-40s #%d → #%d  (~%d missing, %s → %s)\n",
+			trunc(g.Title, 40), g.AfterID, g.BeforeID, g.Missing,
+			shortDate(g.AfterDate), shortDate(g.BeforeDate))
+	}
+	if !*fix {
+		fmt.Println("\nRun `tg-archive doctor --fix` to fetch them.")
+		return nil
+	}
+	fmt.Println("\nFilling gaps…")
+	return tgclient.New(cfg, st).FillGaps(ctx, gaps)
+}
+
+func cmdMedia(ctx context.Context) error {
+	fs := flag.NewFlagSet("media", flag.ExitOnError)
+	chat := fs.String("chat", "", "only this chat")
+	limit := fs.Int("limit", 500, "max files in this pass")
+	_ = fs.Parse(os.Args[2:])
+
+	cfg, st, err := open()
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+
+	var chatID int64
+	if *chat != "" {
+		if chatID, err = resolveChat(st, *chat); err != nil {
+			return err
+		}
+	}
+	return tgclient.New(cfg, st).DownloadMediaPass(ctx, chatID, *limit)
+}
+
+// reorderFlags moves flags ahead of positional arguments, because Go's flag package stops
+// parsing at the first non-flag: `search "words" --limit 5` would otherwise treat
+// "--limit 5" as part of the search text. valued lists flags that take a value.
+func reorderFlags(args []string, valued ...string) []string {
+	takesValue := map[string]bool{}
+	for _, v := range valued {
+		takesValue[v] = true
+	}
+	var flags, positional []string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if !strings.HasPrefix(a, "-") {
+			positional = append(positional, a)
+			continue
+		}
+		flags = append(flags, a)
+		name := strings.TrimLeft(a, "-")
+		if strings.Contains(name, "=") {
+			continue
+		}
+		if takesValue[name] && i+1 < len(args) {
+			i++
+			flags = append(flags, args[i])
+		}
+	}
+	return append(flags, positional...)
+}
+
+func cmdSearch() error {
+	fs := flag.NewFlagSet("search", flag.ExitOnError)
+	chat := fs.String("chat", "", "limit to one chat")
+	sender := fs.String("sender", "", "limit to a sender")
+	from := fs.String("from", "", "on or after YYYY-MM-DD")
+	to := fs.String("to", "", "on or before YYYY-MM-DD")
+	limit := fs.Int("limit", 40, "max hits")
+	_ = fs.Parse(reorderFlags(os.Args[2:], "chat", "sender", "from", "to", "limit"))
+	if fs.NArg() == 0 {
+		return fmt.Errorf(`usage: tg-archive search "words" [--chat X] [--from 2026-01-01]`)
+	}
+
+	cfg, st, err := open()
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+
+	opts := store.SearchOpts{Sender: *sender, From: *from, To: *to, Limit: *limit}
+	if *chat != "" {
+		if opts.ChatID, err = resolveChat(st, *chat); err != nil {
+			return err
+		}
+	}
+	hits, err := st.Search(strings.Join(fs.Args(), " "), opts)
+	if err != nil {
+		return err
+	}
+	titles := map[int64]string{}
+	for _, m := range hits {
+		title, ok := titles[m.ChatID]
+		if !ok {
+			if c, err := st.Chat(m.ChatID); err == nil {
+				title = c.Title
+			}
+			titles[m.ChatID] = title
+		}
+		when := m.Date
+		if t, err := time.Parse(time.RFC3339, m.Date); err == nil {
+			when = t.In(cfg.Location()).Format("2006-01-02 15:04")
+		}
+		body := strings.ReplaceAll(m.Text, "\n", " ")
+		fmt.Printf("%s  %s  %s: %s\n", when, trunc(title, 24), trunc(m.Sender, 16), trunc(body, 90))
+	}
+	fmt.Printf("\n%d hit(s)\n", len(hits))
+	return nil
+}
+
+func shortDate(iso string) string {
+	if t, err := time.Parse(time.RFC3339, iso); err == nil {
+		return t.Format("2006-01-02")
+	}
+	return iso
 }
 
 func cmdMCP(ctx context.Context) error {

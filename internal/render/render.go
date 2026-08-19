@@ -80,7 +80,15 @@ func line(m store.Message, t time.Time, byID map[int]store.Message) string {
 		}
 	}
 	if m.Media != "" {
-		meta = append(meta, "["+m.Media+"]")
+		if m.File != "" {
+			// Obsidian embeds this; other editors show it as a normal link.
+			meta = append(meta, fmt.Sprintf("![[%s]]", m.File))
+		} else {
+			meta = append(meta, "["+m.Media+"]")
+		}
+	}
+	if m.Reactions != "" {
+		meta = append(meta, m.Reactions)
 	}
 	if m.Edited != "" {
 		meta = append(meta, "(edited)")

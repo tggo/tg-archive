@@ -20,6 +20,10 @@ type Config struct {
 	// DBPathOverride keeps the database next to the archive instead of in the config dir.
 	DBPathOverride string `json:"db_path,omitempty"`
 
+	// Media: "none" (markers only), "small" (up to MediaMaxMB), or "all".
+	Media     string `json:"media"`
+	MediaMaxMB int   `json:"media_max_mb,omitempty"`
+
 	Private  bool `json:"private"`
 	Groups   bool `json:"groups"`
 	Saved    bool `json:"saved"`
@@ -33,9 +37,24 @@ type Config struct {
 	loc *time.Location
 }
 
-// Dir is ~/.config/tg-archive (or $XDG_CONFIG_HOME / $TG_ARCHIVE_HOME).
+// profile selects a separate config+session, so a second Telegram account does not need a
+// second machine. Empty means the default profile.
+var profile string
+
+// SetProfile must be called before Load.
+func SetProfile(name string) { profile = name }
+
+// Dir is ~/.config/tg-archive (or $XDG_CONFIG_HOME / $TG_ARCHIVE_HOME), plus the profile
+// subdirectory when one is selected.
 // XDG is used on macOS too: CLI tools live in ~/.config, not "Application Support".
 func Dir() string {
+	if profile == "" {
+		return baseDir()
+	}
+	return filepath.Join(baseDir(), "profiles", profile)
+}
+
+func baseDir() string {
 	if d := os.Getenv("TG_ARCHIVE_HOME"); d != "" {
 		return d
 	}
@@ -138,6 +157,23 @@ func (c *Config) Save() error {
 		return err
 	}
 	return os.WriteFile(Path(), append(b, '\n'), 0o600)
+}
+
+// MediaMaxBytes is the size ceiling for downloads: 0 means no ceiling, -1 means media
+// downloading is off entirely.
+func (c *Config) MediaMaxBytes() int64 {
+	switch c.Media {
+	case "all":
+		return 0
+	case "small":
+		mb := c.MediaMaxMB
+		if mb <= 0 {
+			mb = 5
+		}
+		return int64(mb) * 1024 * 1024
+	default:
+		return -1
+	}
 }
 
 // Allowed reports whether this chat is archived, honouring the skip/only lists.

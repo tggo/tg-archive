@@ -99,12 +99,59 @@ anywhere public.
 | `live` | Watch for new/edited/deleted messages |
 | `send --chat X --text "…" [--reply-to N]` | Send a message (and archive it) |
 | `rerender` | Rebuild every `.md` from the database |
+| `search "words"` | Full-text search: `--chat`, `--sender`, `--from`, `--to` |
+| `media [--chat X]` | Download attachments for messages that have none yet |
+| `doctor [--fix]` | Find holes in the archived history, and fill them |
 | `status` | What is in the archive right now |
 | `mcp [--allow-send]` | Serve the archive to an MCP client over stdio |
 | `import-telethon <StringSession>` | Reuse a Telethon session instead of logging in |
 
 `--chat` takes an id, an `@username`, or part of a chat title — ambiguous matches are
 listed rather than guessed.
+
+Two accounts? Put `--profile <name>` before the command and everything — config, session,
+database, archive — lives separately:
+
+```bash
+tg-archive --profile work setup
+tg-archive --profile work backfill
+```
+
+### Search
+
+Search runs on a SQLite FTS5 index, so it folds case for Cyrillic and Greek too, which
+`LIKE` does not. Several words must all appear; `"quoted words"` is an exact phrase, a
+trailing `*` matches a prefix.
+
+```bash
+tg-archive search "delivery address" --from 2026-01-01
+tg-archive search 'фундамент' --chat VABRAM
+```
+
+### Holes in the history
+
+```bash
+tg-archive doctor         # what is missing
+tg-archive doctor --fix   # fetch it
+```
+
+It reports two different things, and refuses to conflate them: chats never walked back to
+their first message, and missing id ranges — the latter **only** for supergroups and
+channels. Telegram numbers messages per *account* in private chats, so an id jump there
+means you wrote elsewhere in between, not that anything is missing.
+
+### Media
+
+Set `"media": "small"` (with `media_max_mb`) or `"all"` in the config, then:
+
+```bash
+tg-archive media            # download what is still missing
+tg-archive media --chat X
+```
+
+Files land in `attachments/<chat>/` and the Markdown switches from `[photo]` to
+`![[attachments/anna-smith-428424641/352698.jpg]]`, which Obsidian renders inline. History
+comes first and files second on purpose: an interrupted download never costs you messages.
 
 ## Use it from Claude (MCP)
 
@@ -126,6 +173,8 @@ the connection is opened lazily — a read-only session never dials Telegram at 
 | `search_messages` | Substring search across the archive or one chat |
 | `archive_status` | Paths and counts |
 | `sync_chat` | Pull anything newer than the archive has, from Telegram |
+| `download_media` | Fetch attachments for messages that have none |
+| `check_archive` | Report unfinished chats and gaps |
 | `send_message` | Send as your account — **only exposed with `--allow-send`** |
 
 Sending is off by default, because an MCP server that can message your contacts is a
@@ -137,6 +186,9 @@ claude mcp add tg-archive -- tg-archive mcp --allow-send
 
 `send_message` is annotated as destructive and open-world, so a well-behaved client asks
 before calling it.
+
+Chats are also exposed as MCP **resources** (`tg-archive://chat/<id>`), so a client can
+attach one by name instead of calling a tool.
 
 ## Configuration
 
@@ -158,8 +210,9 @@ before calling it.
 }
 ```
 
-Media is not downloaded — messages keep a marker (`[voice 12s]`, `[file spec.pdf 2.1MB]`)
-so an archive of years of chats stays in the tens of megabytes.
+Media is not downloaded by default — messages keep a marker (`[voice 12s]`,
+`[file spec.pdf 2.1MB]`) so an archive of years of chats stays in the tens of megabytes.
+Set `media` to `small` or `all` to fetch the files themselves.
 
 Run it as a background service on macOS:
 

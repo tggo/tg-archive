@@ -136,6 +136,7 @@ func describe(m *tg.Message, chatID int64, ents peer.Entities, selfID int64, loc
 	if ed, ok := m.GetEditDate(); ok && ed > 0 {
 		row.Edited = time.Unix(int64(ed), 0).UTC().Format(time.RFC3339)
 	}
+	row.Reactions = reactionsDesc(m)
 	if fwd, ok := m.GetFwdFrom(); ok {
 		if from, ok := fwd.GetFromID(); ok {
 			row.Fwd = peerName(ents, from)
@@ -146,6 +147,35 @@ func describe(m *tg.Message, chatID int64, ents peer.Entities, selfID int64, loc
 		}
 	}
 	return row
+}
+
+// reactionsDesc renders reactions the way they read in a chat: "👍3 ❤️1".
+// A message whose only answer is a thumbs-up looks ignored in the archive without this.
+func reactionsDesc(m *tg.Message) string {
+	r, ok := m.GetReactions()
+	if !ok || len(r.Results) == 0 {
+		return ""
+	}
+	var parts []string
+	for _, rc := range r.Results {
+		var label string
+		switch v := rc.Reaction.(type) {
+		case *tg.ReactionEmoji:
+			label = v.Emoticon
+		case *tg.ReactionCustomEmoji:
+			label = "custom"
+		case *tg.ReactionPaid:
+			label = "⭐"
+		default:
+			continue
+		}
+		if rc.Count > 1 {
+			parts = append(parts, fmt.Sprintf("%s%d", label, rc.Count))
+		} else {
+			parts = append(parts, label)
+		}
+	}
+	return strings.Join(parts, " ")
 }
 
 func replyTo(m *tg.Message) int {

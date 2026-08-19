@@ -61,6 +61,22 @@ TAR="$DIST/${NAME}_${VERSION#v}_darwin_universal.tar.gz"
 tar -czf "$TAR" -C "$DIST" "$NAME"
 shasum -a 256 "$TAR" | tee "$TAR.sha256"
 
+# Linux builds: same pure-Go binary, no signing involved. Useful for running `live` on a
+# server or in a container.
+for arch in arm64 amd64; do
+  echo "==> build linux/$arch"
+  CGO_ENABLED=0 GOOS=linux GOARCH=$arch \
+    go build -trimpath -ldflags "$LDFLAGS" -o "$DIST/$NAME-linux-$arch" ./cmd/$NAME
+  LTAR="$DIST/${NAME}_${VERSION#v}_linux_${arch}.tar.gz"
+  mv "$DIST/$NAME-linux-$arch" "$DIST/$NAME"
+  tar -czf "$LTAR" -C "$DIST" "$NAME"
+  shasum -a 256 "$LTAR" | tee "$LTAR.sha256"
+  rm "$DIST/$NAME"
+done
+# restore the signed universal binary that the tarball above was made from
+tar -xzf "$TAR" -C "$DIST"
+
 echo
-echo "done: $TAR"
-echo "sha256: $(awk '{print $1}' "$TAR.sha256")"
+echo "done:"
+ls -1 "$DIST"/*.tar.gz | sed 's/^/  /'
+echo "darwin sha256: $(awk '{print $1}' "$TAR.sha256")"

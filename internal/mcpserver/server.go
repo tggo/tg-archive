@@ -49,15 +49,17 @@ func (s *Server) Run(ctx context.Context, version string) error {
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "read_chat",
-		Description: "Read messages of one chat from the local archive, oldest-first. " +
-			"Defaults to the most recent messages; pass before_id to page further back.",
+		Description: "Read messages of one chat from the local archive, oldest-first. Defaults " +
+			"to the most recent messages; page back with before_id, or ask for a period with " +
+			"from/to dates.",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
 	}, s.readChat)
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name: "search_messages",
-		Description: "Substring search over archived message text, newest first. " +
-			"Optionally limited to one chat.",
+		Description: "Full-text search over archived messages, newest first. Several words " +
+			"must all appear; \"quoted words\" match an exact phrase, trailing * matches a " +
+			"prefix. Can be narrowed by chat, sender and date range.",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
 	}, s.searchMessages)
 
@@ -74,6 +76,20 @@ func (s *Server) Run(ctx context.Context, version string) error {
 			"Telegram, and write them to the archive. Use before reading if freshness matters.",
 	}, s.syncChat)
 
+	mcp.AddTool(srv, &mcp.Tool{
+		Name: "download_media",
+		Description: "Download attachments (photos, voice notes, files) for archived messages " +
+			"that have none yet, so they can be opened from the Markdown. Requires media " +
+			"downloading to be enabled in the config.",
+	}, s.downloadMedia)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name: "check_archive",
+		Description: "Report holes in the archived history: chats never walked back to the " +
+			"beginning, and missing id ranges in supergroups and channels.",
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
+	}, s.checkArchive)
+
 	if s.allowSend {
 		mcp.AddTool(srv, &mcp.Tool{
 			Name: "send_message",
@@ -82,6 +98,10 @@ func (s *Server) Run(ctx context.Context, version string) error {
 				"Confirm the exact chat and text with the user before calling it.",
 			Annotations: &mcp.ToolAnnotations{DestructiveHint: ptr(true), OpenWorldHint: ptr(true)},
 		}, s.sendMessage)
+	}
+
+	if err := s.addResources(srv); err != nil {
+		return err
 	}
 
 	return srv.Run(ctx, &mcp.StdioTransport{})
@@ -150,19 +170,23 @@ type ReadChatIn struct {
 	Limit    int    `json:"limit,omitempty" jsonschema:"how many messages (default 50, max 500)"`
 	BeforeID int    `json:"before_id,omitempty" jsonschema:"return messages older than this message id"`
 	AroundID int    `json:"around_id,omitempty" jsonschema:"return messages surrounding this message id"`
+	From     string `json:"from,omitempty" jsonschema:"only messages on or after this date, YYYY-MM-DD"`
+	To       string `json:"to,omitempty" jsonschema:"only messages on or before this date, YYYY-MM-DD"`
 }
 
 type MessageOut struct {
-	ID      int    `json:"id"`
-	Date    string `json:"date"`
-	Sender  string `json:"sender"`
-	Mine    bool   `json:"mine,omitempty"`
-	Text    string `json:"text,omitempty"`
-	Media   string `json:"media,omitempty"`
-	ReplyTo int    `json:"reply_to,omitempty"`
-	Fwd     string `json:"forwarded_from,omitempty"`
-	Edited  bool   `json:"edited,omitempty"`
-	Deleted bool   `json:"deleted,omitempty"`
+	ID        int    `json:"id"`
+	Date      string `json:"date"`
+	Sender    string `json:"sender"`
+	Mine      bool   `json:"mine,omitempty"`
+	Text      string `json:"text,omitempty"`
+	Media     string `json:"media,omitempty"`
+	ReplyTo   int    `json:"reply_to,omitempty"`
+	Fwd       string `json:"forwarded_from,omitempty"`
+	Edited    bool   `json:"edited,omitempty"`
+	Deleted   bool   `json:"deleted,omitempty"`
+	Reactions string `json:"reactions,omitempty"`
+	File      string `json:"file,omitempty"`
 }
 
 type ReadChatOut struct {
@@ -178,10 +202,15 @@ func (s *Server) readChat(ctx context.Context, _ *mcp.CallToolRequest, in ReadCh
 	}
 	limit := clamp(in.Limit, 50, 500)
 
+	if err := checkDates(in.From, in.To); err != nil {
+		return nil, ReadChatOut{}, err
+	}
 	var msgs []store.Message
 	switch {
 	case in.AroundID > 0:
 		msgs, err = s.st.Around(chat.ID, in.AroundID, limit/2)
+	case in.From != "" || in.To != "":
+		msgs, err = s.st.Range(chat.ID, in.From, in.To, limit)
 	case in.BeforeID > 0:
 		msgs, err = s.st.Before(chat.ID, in.BeforeID, limit)
 	default:
@@ -211,9 +240,12 @@ func (s *Server) readChat(ctx context.Context, _ *mcp.CallToolRequest, in ReadCh
 }
 
 type SearchIn struct {
-	Query string `json:"query" jsonschema:"substring to look for in message text"`
-	Chat  string `json:"chat,omitempty" jsonschema:"limit the search to one chat"`
-	Limit int    `json:"limit,omitempty" jsonschema:"max hits (default 30, max 200)"`
+	Query  string `json:"query" jsonschema:"words to look for; several words must all appear. Use \"quoted words\" for an exact phrase and trailing * for a prefix"`
+	Chat   string `json:"chat,omitempty" jsonschema:"limit the search to one chat"`
+	Sender string `json:"sender,omitempty" jsonschema:"only messages from senders whose name contains this"`
+	From   string `json:"from,omitempty" jsonschema:"only messages on or after this date, YYYY-MM-DD"`
+	To     string `json:"to,omitempty" jsonschema:"only messages on or before this date, YYYY-MM-DD"`
+	Limit  int    `json:"limit,omitempty" jsonschema:"max hits (default 30, max 200)"`
 }
 
 type SearchHit struct {
@@ -239,7 +271,13 @@ func (s *Server) searchMessages(ctx context.Context, _ *mcp.CallToolRequest, in 
 		}
 		chatID, title = c.ID, c.Title
 	}
-	msgs, err := s.st.Search(in.Query, chatID, clamp(in.Limit, 30, 200))
+	if err := checkDates(in.From, in.To); err != nil {
+		return nil, SearchOut{}, err
+	}
+	msgs, err := s.st.Search(in.Query, store.SearchOpts{
+		ChatID: chatID, Sender: in.Sender, From: in.From, To: in.To,
+		Limit: clamp(in.Limit, 30, 200),
+	})
 	if err != nil {
 		return nil, SearchOut{}, err
 	}
@@ -364,6 +402,81 @@ func (s *Server) sendMessage(ctx context.Context, _ *mcp.CallToolRequest, in Sen
 		SendOut{ChatID: chat.ID, MessageID: id}, nil
 }
 
+type MediaIn struct {
+	Chat  string `json:"chat,omitempty" jsonschema:"only this chat; omit for all"`
+	Limit int    `json:"limit,omitempty" jsonschema:"max files in this pass (default 100)"`
+}
+
+type MediaOut struct {
+	Downloaded int `json:"downloaded"`
+	Skipped    int `json:"skipped"`
+}
+
+func (s *Server) downloadMedia(ctx context.Context, _ *mcp.CallToolRequest, in MediaIn) (*mcp.CallToolResult, MediaOut, error) {
+	var chatID int64
+	if in.Chat != "" {
+		c, err := s.resolve(in.Chat)
+		if err != nil {
+			return nil, MediaOut{}, err
+		}
+		chatID = c.ID
+	}
+	sess, err := s.connect(ctx)
+	if err != nil {
+		return nil, MediaOut{}, err
+	}
+	var got, skipped int
+	err = sess.Do(ctx, func(ctx context.Context) error {
+		got, skipped, err = s.client.DownloadMedia(ctx, chatID, clamp(in.Limit, 100, 1000))
+		return err
+	})
+	if err != nil {
+		return nil, MediaOut{}, err
+	}
+	return text(fmt.Sprintf("downloaded %d file(s), skipped %d", got, skipped)),
+		MediaOut{Downloaded: got, Skipped: skipped}, nil
+}
+
+type CheckOut struct {
+	Unfinished []ChatOut `json:"unfinished_chats"`
+	Gaps       []GapOut  `json:"gaps"`
+}
+
+type GapOut struct {
+	ChatID   int64  `json:"chat_id"`
+	Chat     string `json:"chat"`
+	AfterID  int    `json:"after_id"`
+	BeforeID int    `json:"before_id"`
+	Missing  int    `json:"missing"`
+}
+
+func (s *Server) checkArchive(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, CheckOut, error) {
+	unfinished, err := s.st.Unfinished()
+	if err != nil {
+		return nil, CheckOut{}, err
+	}
+	gaps, err := s.st.Gaps(50)
+	if err != nil {
+		return nil, CheckOut{}, err
+	}
+	var out CheckOut
+	var b strings.Builder
+	for _, c := range unfinished {
+		out.Unfinished = append(out.Unfinished, ChatOut{ID: c.ID, Kind: c.Kind, Title: c.Title, Messages: c.Count})
+	}
+	fmt.Fprintf(&b, "%d chat(s) not walked back to the beginning\n", len(unfinished))
+	for i, g := range gaps {
+		if i < 20 {
+			fmt.Fprintf(&b, "  %s: #%d → #%d (~%d missing)\n", g.Title, g.AfterID, g.BeforeID, g.Missing)
+		}
+		out.Gaps = append(out.Gaps, GapOut{ChatID: g.ChatID, Chat: g.Title,
+			AfterID: g.AfterID, BeforeID: g.BeforeID, Missing: g.Missing})
+	}
+	fmt.Fprintf(&b, "%d gap(s) in supergroups/channels. Private chats cannot be checked this "+
+		"way: Telegram numbers their messages per account, so id jumps there are normal.\n", len(gaps))
+	return text(b.String()), out, nil
+}
+
 // ---------------------------------------------------------------- helpers
 
 // connect opens the Telegram connection on first need and reuses it afterwards.
@@ -409,6 +522,7 @@ func (s *Server) msgOut(m store.Message) MessageOut {
 	return MessageOut{
 		ID: m.ID, Date: s.local(m.Date), Sender: m.Sender, Mine: m.Out, Text: m.Text,
 		Media: m.Media, ReplyTo: m.ReplyTo, Fwd: m.Fwd, Edited: m.Edited != "", Deleted: m.Deleted,
+		Reactions: m.Reactions, File: m.File,
 	}
 }
 
@@ -438,6 +552,9 @@ func describeBody(m store.Message) string {
 	if m.Media != "" {
 		parts = append(parts, "["+m.Media+"]")
 	}
+	if m.Reactions != "" {
+		parts = append(parts, m.Reactions)
+	}
 	if m.Edited != "" {
 		parts = append(parts, "(edited)")
 	}
@@ -456,6 +573,19 @@ func describeBody(m store.Message) string {
 
 func text(s string) *mcp.CallToolResult {
 	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: s}}}
+}
+
+// checkDates rejects a malformed date early, with a message that says what was expected.
+func checkDates(dates ...string) error {
+	for _, d := range dates {
+		if d == "" {
+			continue
+		}
+		if _, err := time.Parse("2006-01-02", d); err != nil {
+			return fmt.Errorf("date %q must look like 2026-08-19", d)
+		}
+	}
+	return nil
 }
 
 func containsFold(haystack, needle string) bool {
