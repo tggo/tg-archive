@@ -46,6 +46,10 @@ file:
 brew install tggo/tap/tg-archive
 ```
 
+The binary is universal (arm64 + x86_64) and signed with a Developer ID, but **not yet
+notarized by Apple**. Homebrew does not quarantine what it installs, so it runs as-is; a
+browser download would be gated until a notarized build ships.
+
 Or build from source (Go 1.24+):
 
 ```bash
