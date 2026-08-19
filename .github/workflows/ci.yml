@@ -1,0 +1,29 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+      - run: go vet ./...
+      - run: go test -race ./...
+      - name: build (darwin universal smoke)
+        if: runner.os == 'macOS'
+        run: |
+          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -o /tmp/a ./cmd/tg-archive
+          CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -o /tmp/b ./cmd/tg-archive
+          lipo -create -output /tmp/tg-archive /tmp/a /tmp/b
+          lipo -info /tmp/tg-archive
+          /tmp/tg-archive version

@@ -1,0 +1,5 @@
+dist/
+*.session
+session.json
+state.db*
+config.json
