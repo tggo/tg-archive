@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tg-archive — keep your Telegram in plain Markdown</title>
+<meta name="description" content="Step-by-step guide: archive your own Telegram into Markdown files on your Mac, and let Claude read and write Telegram through MCP.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🗂️</text></svg>">
+<style>
+:root{
+  --bg:#12100e; --bg-soft:#1a1714; --card:#1f1b17; --line:#332c25;
+  --ink:#efe7dd; --ink-dim:#b3a695; --ink-faint:#7d7264;
+  --accent:#e8a13a; --accent-soft:#3a2b14; --ok:#7bb661; --warn:#e2703a;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.65 var(--sans);
+  -webkit-font-smoothing:antialiased}
+.wrap{max-width:820px;margin:0 auto;padding:0 20px}
+a{color:var(--accent)}
+h1,h2,h3{line-height:1.25;letter-spacing:-.015em}
+h1{font-size:clamp(30px,6vw,46px);margin:0 0 12px}
+h2{font-size:clamp(22px,4vw,28px);margin:56px 0 14px;padding-top:14px;border-top:1px solid var(--line)}
+h3{font-size:18px;margin:28px 0 8px;color:var(--ink)}
+p{margin:0 0 14px}
+code{font:14px/1.5 var(--mono);background:var(--bg-soft);border:1px solid var(--line);
+  border-radius:5px;padding:1px 5px}
+pre{position:relative;background:#0d0b09;border:1px solid var(--line);border-radius:10px;
+  padding:16px 16px;overflow-x:auto;margin:0 0 16px}
+pre code{background:none;border:0;padding:0;font-size:13.5px;color:#e7dfd3}
+pre .c{color:var(--ink-faint)}
+pre .p{color:var(--accent)}
+.copy{position:absolute;top:8px;right:8px;background:var(--card);color:var(--ink-dim);
+  border:1px solid var(--line);border-radius:6px;font:11px var(--sans);padding:4px 8px;
+  cursor:pointer;opacity:0;transition:.15s}
+pre:hover .copy,.copy:focus{opacity:1}
+.copy:hover{color:var(--ink);border-color:var(--accent)}
+
+header{padding:64px 0 8px;background:
+  radial-gradient(900px 320px at 15% -10%, #2a1f12 0%, transparent 70%)}
+.tag{display:inline-block;font:12px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;
+  color:var(--accent);background:var(--accent-soft);border:1px solid #4a3617;
+  border-radius:99px;padding:6px 11px;margin-bottom:18px}
+.lede{font-size:19px;color:var(--ink-dim);max-width:60ch}
+.cta{display:flex;gap:10px;flex-wrap:wrap;margin:26px 0 8px}
+.btn{display:inline-block;padding:10px 16px;border-radius:9px;text-decoration:none;font-weight:600;font-size:15px}
+.btn-1{background:var(--accent);color:#20160a}
+.btn-2{border:1px solid var(--line);color:var(--ink)}
+
+.sample{background:var(--card);border:1px solid var(--line);border-left:3px solid var(--accent);
+  border-radius:10px;padding:14px 16px;font:13.5px/1.7 var(--mono);color:var(--ink-dim);
+  overflow-x:auto;margin:0 0 16px}
+.sample b{color:var(--ink);font-weight:600}
+.sample .dim{color:var(--ink-faint)}
+
+.step{display:flex;gap:16px;margin:0 0 26px}
+.num{flex:0 0 30px;height:30px;border-radius:50%;background:var(--accent-soft);
+  border:1px solid #4a3617;color:var(--accent);font:600 14px/29px var(--sans);text-align:center}
+.step-body{flex:1;min-width:0}
+.step-body>h3{margin-top:2px}
+
+.note{background:var(--bg-soft);border:1px solid var(--line);border-radius:10px;
+  padding:14px 16px;margin:0 0 16px;color:var(--ink-dim);font-size:15px}
+.note b{color:var(--ink)}
+.note.warn{border-color:#5a3520;background:#221610}
+.note.warn b{color:var(--warn)}
+
+table{width:100%;border-collapse:collapse;margin:0 0 18px;font-size:15px;display:block;overflow-x:auto}
+th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--ink-faint);font:12px/1.4 var(--sans);text-transform:uppercase;letter-spacing:.06em}
+td code{white-space:nowrap}
+
+details{border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin:0 0 10px;
+  background:var(--bg-soft)}
+details[open]{background:var(--card)}
+summary{cursor:pointer;font-weight:600;color:var(--ink)}
+summary::marker{color:var(--accent)}
+details>*:last-child{margin-bottom:0}
+details p:first-of-type{margin-top:12px}
+
+footer{margin:70px 0 50px;padding-top:22px;border-top:1px solid var(--line);
+  color:var(--ink-faint);font-size:14px}
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <span class="tag">macOS · open source · MIT</span>
+    <h1>Your Telegram, as Markdown files</h1>
+    <p class="lede">tg-archive keeps a copy of your own Telegram chats on your own disk —
+    readable in any text editor, searchable, and updated within seconds of a message
+    arriving. Claude can read and write it too.</p>
+    <div class="cta">
+      <a class="btn btn-1" href="#install">Install in 5 minutes</a>
+      <a class="btn btn-2" href="https://github.com/tggo/tg-archive">Source on GitHub</a>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+<p>This is what ends up on your disk — one file per chat per month:</p>
+<div class="sample">
+<span class="dim">## 2026-08-19</span><br>
+<b>14:32</b> · <b>Anna</b> ↳ replying to “are you around tomorrow?”: yes, after 6<br>
+<b>14:33</b> · <b>me</b> [voice 12s]<br>
+<b>14:41</b> · <b>Anna</b> (edited): make it 7, actually
+</div>
+
+<div class="note"><b>Is this allowed?</b> Yes. Telegram publishes the protocol its own apps
+use, and this is a normal client signing in as you, on your account, reading your own
+messages. It is not scraping anyone else's data.</div>
+
+<h2 id="install">Part 1 — Install</h2>
+
+<div class="step"><div class="num">1</div><div class="step-body">
+<h3>Get Homebrew, if you don't have it</h3>
+<p>Homebrew installs command-line software on a Mac. Open <b>Terminal</b>
+(press <code>⌘ Space</code>, type “Terminal”, hit Enter) and paste:</p>
+<pre><code>/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"</code></pre>
+<p>Already have it? Skip to step 2. To check, type <code>brew --version</code>.</p>
+</div></div>
+
+<div class="step"><div class="num">2</div><div class="step-body">
+<h3>Install tg-archive</h3>
+<pre><code>brew install tggo/tap/tg-archive</code></pre>
+<p>Verify it landed:</p>
+<pre><code>tg-archive version</code></pre>
+<div class="note"><b>“command not found”?</b> Close the Terminal window and open a new one —
+Homebrew adds itself to your <code>PATH</code> only for new sessions.</div>
+</div></div>
+
+<h2 id="keys">Part 2 — Get your API keys</h2>
+
+<p>Telegram hands out API credentials <b>per account</b>. Every client needs a pair, and
+yours are not shared with anyone — not even with this project. It takes about two minutes.</p>
+
+<div class="step"><div class="num">1</div><div class="step-body">
+<h3>Open my.telegram.org</h3>
+<p>Go to <a href="https://my.telegram.org" target="_blank" rel="noopener">my.telegram.org</a>
+and type your phone number in international format, including the country code:
+<code>+380671234567</code>, <code>+12025550123</code>.</p>
+</div></div>
+
+<div class="step"><div class="num">2</div><div class="step-body">
+<h3>Take the code from Telegram itself</h3>
+<p>The confirmation code is <b>not an SMS</b>. It arrives as a message inside Telegram, in
+the chat called <b>Telegram</b> — open the app on your phone or desktop and look there.</p>
+<div class="note warn"><b>Never give that code to anyone.</b> Telegram support will never
+ask for it, and anyone who does is trying to take your account. You are typing it into
+Telegram's own website here, which is the one place it belongs.</div>
+</div></div>
+
+<div class="step"><div class="num">3</div><div class="step-body">
+<h3>API development tools → create an app</h3>
+<p>After signing in, click <b>API development tools</b>. Fill the short form:</p>
+<table>
+<tr><th>Field</th><th>What to put</th></tr>
+<tr><td>App title</td><td><code>tg-archive</code> — any name, only you see it</td></tr>
+<tr><td>Short name</td><td><code>tgarchive</code></td></tr>
+<tr><td>URL</td><td>leave empty</td></tr>
+<tr><td>Platform</td><td>Desktop</td></tr>
+<tr><td>Description</td><td>leave empty</td></tr>
+</table>
+<p>Press <b>Create application</b>. The next page shows two values:</p>
+<table>
+<tr><th>Value</th><th>Looks like</th></tr>
+<tr><td><code>api_id</code></td><td>a number, e.g. <code>2040815</code></td></tr>
+<tr><td><code>api_hash</code></td><td>32 letters and digits</td></tr>
+</table>
+<div class="note warn"><b>Treat api_hash like a password.</b> Don't post it in issues,
+screenshots, or chats. If it leaks, you can create a new application.</div>
+</div></div>
+
+<h2 id="first-run">Part 3 — First run</h2>
+
+<div class="step"><div class="num">1</div><div class="step-body">
+<h3>Answer the setup questions</h3>
+<pre><code>tg-archive setup</code></pre>
+<p>It asks, one at a time — press Enter to accept anything in brackets:</p>
+<table>
+<tr><th>Question</th><th>Answer</th></tr>
+<tr><td>api_id / api_hash</td><td>paste what you just got</td></tr>
+<tr><td>where to write the archive</td><td>Enter for <code>~/TelegramArchive</code>, or your own path</td></tr>
+<tr><td>timezone</td><td><code>Europe/Kyiv</code>, <code>America/New_York</code>… or <code>Local</code></td></tr>
+<tr><td>private chats / groups / Saved Messages</td><td><code>y</code> — the useful stuff</td></tr>
+<tr><td>channels you follow / bot chats</td><td><code>n</code> unless you want the noise</td></tr>
+</table>
+</div></div>
+
+<div class="step"><div class="num">2</div><div class="step-body">
+<h3>Sign in</h3>
+<pre><code>tg-archive login</code></pre>
+<p>Phone number, then the code (again: it arrives <b>inside Telegram</b>), then your cloud
+password if you use two-step verification. You do this once — the session is stored on
+your Mac.</p>
+</div></div>
+
+<div class="step"><div class="num">3</div><div class="step-body">
+<h3>Pull your history</h3>
+<pre><code>tg-archive backfill</code></pre>
+<p>This walks every chat from newest to oldest. Years of chats take a while — tens of
+minutes to a few hours, and Telegram will slow it down on purpose at times, which the tool
+waits out. <b>You can stop it any time with <code>Ctrl-C</code></b> and run it again later;
+it resumes where it left off rather than starting over.</p>
+<p>Want a taste first? Grab the last 200 messages of each chat:</p>
+<pre><code>tg-archive backfill --limit 200</code></pre>
+</div></div>
+
+<div class="step"><div class="num">4</div><div class="step-body">
+<h3>Keep it up to date</h3>
+<p>Run it as a background service, so new messages land in the archive within seconds:</p>
+<pre><code>brew services start tggo/tap/tg-archive</code></pre>
+<p>Or run it in a window while you watch:</p>
+<pre><code>tg-archive live</code></pre>
+</div></div>
+
+<h2 id="files">What you get</h2>
+
+<pre><code>~/TelegramArchive/
+├── index.md                      <span class="c">← table of every chat</span>
+└── chats/
+    └── anna-smith-428424641/
+        ├── 2017-05.md
+        └── 2026-08.md            <span class="c">← one file per month</span></code></pre>
+
+<p>Point <a href="https://obsidian.md" target="_blank" rel="noopener">Obsidian</a> at that
+folder and it becomes a searchable, linkable notebook of your conversations. Or just use
+Spotlight, <code>grep</code>, or any editor — they are ordinary text files.</p>
+
+<h3>Why edits and deletions are honest</h3>
+<p>Messages go into a small database first, and the Markdown is redrawn from it. So when
+someone edits a message, the archive updates that line and marks it <code>(edited)</code>;
+when someone deletes one, the archive keeps it and marks it <code>(DELETED)</code>. You can
+rebuild every file at any time, with no internet:</p>
+<pre><code>tg-archive rerender</code></pre>
+
+<div class="note"><b>Media is not downloaded.</b> Photos, files and voice notes leave a
+marker like <code>[voice 12s]</code> or <code>[file report.pdf 2.1MB]</code>. That keeps
+years of chats down to tens of megabytes instead of hundreds of gigabytes.</div>
+
+<h2 id="claude">Part 4 — Let Claude use it</h2>
+
+<p>The same program can act as an <b>MCP server</b>, which is how Claude connects to tools
+on your machine. One command:</p>
+<pre><code>claude mcp add tg-archive -- tg-archive mcp</code></pre>
+
+<p>Now you can ask Claude things like “what did Anna say about the trip in June?” or “find
+every message where someone sent me an address”. It reads the local archive, so answers are
+instant and work even with no connection.</p>
+
+<h3>If you also want Claude to send messages</h3>
+<pre><code>claude mcp add tg-archive -- tg-archive mcp --allow-send</code></pre>
+<div class="note warn"><b>Think before enabling this.</b> A tool that can message your
+contacts is a different kind of risk from one that reads a local file. Sending is off
+unless you pass that flag, and the tool is marked so Claude asks before using it.</div>
+
+<table>
+<tr><th>What Claude can do</th><th>Where the data comes from</th></tr>
+<tr><td><code>list_chats</code>, <code>read_chat</code>, <code>search_messages</code>, <code>archive_status</code></td><td>your local archive — instant, offline</td></tr>
+<tr><td><code>sync_chat</code></td><td>Telegram, to fetch anything newer</td></tr>
+<tr><td><code>send_message</code></td><td>Telegram — only with <code>--allow-send</code></td></tr>
+</table>
+
+<h2 id="commands">Command cheat sheet</h2>
+<table>
+<tr><th>Command</th><th>What it does</th></tr>
+<tr><td><code>tg-archive setup</code></td><td>Ask the setup questions again</td></tr>
+<tr><td><code>tg-archive login</code></td><td>Sign in to Telegram</td></tr>
+<tr><td><code>tg-archive chats</code></td><td>List your chats and their ids</td></tr>
+<tr><td><code>tg-archive backfill</code></td><td>Pull history (resumable)</td></tr>
+<tr><td><code>tg-archive live</code></td><td>Watch for new messages</td></tr>
+<tr><td><code>tg-archive status</code></td><td>How much is archived</td></tr>
+<tr><td><code>tg-archive send --chat "Anna" --text "on my way"</code></td><td>Send a message</td></tr>
+<tr><td><code>tg-archive rerender</code></td><td>Rebuild all files from the database</td></tr>
+<tr><td><code>tg-archive mcp</code></td><td>Serve the archive to Claude</td></tr>
+</table>
+
+<h2 id="trouble">When something goes wrong</h2>
+
+<details><summary>“no config … run `tg-archive setup`”</summary>
+<p>You skipped Part 3, or you are running as a different user than the one you set up. Run
+<code>tg-archive setup</code>.</p></details>
+
+<details><summary>macOS says the app “cannot be opened” or is from an unidentified developer</summary>
+<p>Installing through Homebrew avoids this entirely — Homebrew doesn't mark downloads as
+quarantined. If you downloaded the tarball with a browser instead, macOS holds it until the
+build is notarized by Apple. Use <code>brew install tggo/tap/tg-archive</code>.</p></details>
+
+<details><summary>The login code never arrives</summary>
+<p>It is sent <b>inside Telegram</b>, not by SMS — open the app and look for the chat named
+<b>Telegram</b>. If you are signed out everywhere, Telegram falls back to SMS, which can
+take a few minutes.</p></details>
+
+<details><summary>It asks for a password after the code</summary>
+<p>That is two-step verification (a “cloud password”) that you set up in Telegram earlier.
+It is not your phone passcode and not the login code. Forgot it? Telegram can reset it from
+Settings → Privacy and Security → Two-Step Verification.</p></details>
+
+<details><summary>backfill is slow, or pauses for minutes</summary>
+<p>Normal. Telegram rate-limits history requests and asks clients to wait; tg-archive waits
+instead of hammering, which is what keeps your account in good standing. Leave it running,
+or stop it and continue later — progress is saved.</p></details>
+
+<details><summary>A chat shows a number instead of a name</summary>
+<p>That account was deleted, so Telegram no longer serves a name for it. The messages are
+still archived.</p></details>
+
+<details><summary>My secret chats are missing</summary>
+<p>Secret chats are end-to-end encrypted and stored only on the two devices that created
+them. No client can export them — not this one, not Telegram Desktop. Nothing to fix.</p></details>
+
+<details><summary>I want to start over</summary>
+<p>Delete <code>~/.config/tg-archive</code> (settings and session) and your archive folder,
+then run <code>tg-archive setup</code> again. Removing the session here does not log you out
+of Telegram elsewhere; to revoke it from Telegram's side, use Settings → Devices.</p></details>
+
+<h2 id="safety">Fair warnings</h2>
+<table>
+<tr><th></th><th></th></tr>
+<tr><td><b>Don't bulk-message</b></td><td>This signs in as you. Telegram bans accounts for mass
+sending, and a ban takes your archive's access with it.</td></tr>
+<tr><td><b>The archive is plain text</b></td><td>Anyone with access to your Mac (or your backups)
+can read it. Put it on an encrypted disk — FileVault covers your internal drive.</td></tr>
+<tr><td><b>Other people are in it</b></td><td>Your chats contain their words too. Publishing
+them is your call and your responsibility.</td></tr>
+</table>
+
+<footer class="wrap" style="padding:0">
+  <p><a href="https://github.com/tggo/tg-archive">github.com/tggo/tg-archive</a> · MIT ·
+  built on <a href="https://github.com/gotd/td">gotd</a> ·
+  <a href="https://github.com/tggo/tg-archive/issues">report a problem</a></p>
+</footer>
+</main>
+
+<script>
+// Copy buttons: added in JS so the page still reads fine with scripting off.
+document.querySelectorAll('pre').forEach(function (pre) {
+  var b = document.createElement('button');
+  b.className = 'copy';
+  b.textContent = 'copy';
+  b.addEventListener('click', function () {
+    navigator.clipboard.writeText(pre.querySelector('code').innerText).then(function () {
+      b.textContent = 'copied';
+      setTimeout(function () { b.textContent = 'copy'; }, 1200);
+    });
+  });
+  pre.appendChild(b);
+});
+</script>
+</body>
+</html>

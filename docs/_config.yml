@@ -1,0 +1,2 @@
+# GitHub Pages serves docs/ as-is; no Jekyll processing needed for a single HTML file.
+theme: null
