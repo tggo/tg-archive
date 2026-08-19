@@ -68,11 +68,20 @@ tg-archive backfill  # full history; interrupt and re-run, it resumes
 tg-archive live      # daemon: new/edited/deleted → .md within ~3s
 ```
 
-Migrating from a Telethon-based setup? Keep your session instead of logging in again:
+Migrating from a Telethon-based setup? Keep your session instead of logging in again.
+Print the StringSession from your existing session file:
+
+```python
+from telethon.sessions import StringSession, SQLiteSession
+print(StringSession.save(SQLiteSession("/path/to/your.session")))
+```
 
 ```bash
-tg-archive import-telethon "1BVtsOHYBu..."   # StringSession
+tg-archive import-telethon "1BVtsOHYBu..."
 ```
+
+That string is full access to the account — treat it like a password, and never paste it
+anywhere public.
 
 ## Commands
 
