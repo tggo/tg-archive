@@ -232,6 +232,26 @@ tg-archive --profile work backfill</code></pre>
 <tr><td><code>send_message</code></td><td>Telegram — лише з <code>--allow-send</code></td></tr>
 </table>
 
+<h3>Claude Desktop замість Claude Code</h3>
+<p>У Claude Desktop немає команди <code>claude mcp add</code> — він читає власний файл
+конфігурації. Відкрий (або створи):</p>
+<pre><code>~/Library/Application Support/Claude/claude_desktop_config.json</code></pre>
+<p>і додай tg-archive у <code>mcpServers</code>:</p>
+<pre><code>{
+  "mcpServers": {
+    "tg-archive": {
+      "command": "/opt/homebrew/bin/tg-archive",
+      "args": ["mcp"]
+    }
+  }
+}</code></pre>
+<div class="note">Вкажи <b>повний шлях</b> до бінарника, а не просто <code>tg-archive</code> —
+десктопний застосунок не бачить <code>PATH</code> твоєї оболонки. Виконай
+<code>which tg-archive</code> у терміналі, щоб дізнатись шлях (Homebrew на Apple Silicon
+ставить у <code>/opt/homebrew/bin</code>, на Intel-Маках — у <code>/usr/local/bin</code>).
+Додай <code>"--allow-send"</code> у список <code>args</code>, якщо хочеш ще й надсилання, а
+тоді перезапусти Claude Desktop.</div>
+
 <h2 id="commands">Шпаргалка команд</h2>
 <table>
 <tr><th>Команда</th><th>Що робить</th></tr>

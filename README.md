@@ -211,6 +211,31 @@ before calling it.
 Chats are also exposed as MCP **resources** (`tg-archive://chat/<id>`), so a client can
 attach one by name instead of calling a tool.
 
+### Claude Desktop
+
+Claude Desktop doesn't run `claude mcp add` — it reads its own config file. Find yours at:
+
+- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- Linux: `~/.config/Claude/claude_desktop_config.json`
+
+Add an entry under `mcpServers`, using the **full path** to the binary — Desktop apps don't
+inherit your shell's `PATH`, so a bare `tg-archive` won't be found:
+
+```json
+{
+  "mcpServers": {
+    "tg-archive": {
+      "command": "/opt/homebrew/bin/tg-archive",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Run `which tg-archive` to get the right path for your install (Homebrew on Apple Silicon
+uses `/opt/homebrew/bin`, Intel and Linux typically `/usr/local/bin`). To allow sending
+messages too, add `"--allow-send"` to `args`. Restart Claude Desktop after editing the file.
+
 ## Configuration
 
 `~/.config/tg-archive/config.json`:

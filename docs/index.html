@@ -232,6 +232,25 @@ unless you pass that flag, and the tool is marked so Claude asks before using it
 <tr><td><code>send_message</code></td><td>Telegram — only with <code>--allow-send</code></td></tr>
 </table>
 
+<h3>Claude Desktop instead of Claude Code</h3>
+<p>Claude Desktop doesn't have the <code>claude mcp add</code> command — it reads its own
+config file instead. Open (or create):</p>
+<pre><code>~/Library/Application Support/Claude/claude_desktop_config.json</code></pre>
+<p>and add tg-archive under <code>mcpServers</code>:</p>
+<pre><code>{
+  "mcpServers": {
+    "tg-archive": {
+      "command": "/opt/homebrew/bin/tg-archive",
+      "args": ["mcp"]
+    }
+  }
+}</code></pre>
+<div class="note">Use the <b>full path</b> to the binary, not just <code>tg-archive</code> —
+Desktop apps don't see your shell's <code>PATH</code>. Run <code>which tg-archive</code> in
+Terminal to find it (Homebrew on Apple Silicon installs to <code>/opt/homebrew/bin</code>,
+Intel Macs to <code>/usr/local/bin</code>). Add <code>"--allow-send"</code> to the
+<code>args</code> list if you also want sending, then quit and reopen Claude Desktop.</div>
+
 <h2 id="commands">Command cheat sheet</h2>
 <table>
 <tr><th>Command</th><th>What it does</th></tr>
