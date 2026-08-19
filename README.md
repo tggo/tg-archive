@@ -95,9 +95,43 @@ anywhere public.
 | `send --chat X --text "…" [--reply-to N]` | Send a message (and archive it) |
 | `rerender` | Rebuild every `.md` from the database |
 | `status` | What is in the archive right now |
+| `mcp [--allow-send]` | Serve the archive to an MCP client over stdio |
+| `import-telethon <StringSession>` | Reuse a Telethon session instead of logging in |
 
 `--chat` takes an id, an `@username`, or part of a chat title — ambiguous matches are
 listed rather than guessed.
+
+## Use it from Claude (MCP)
+
+The same binary is an MCP server, so Claude can read your Telegram history, search it, and
+(optionally) send messages:
+
+```bash
+claude mcp add tg-archive -- tg-archive mcp
+```
+
+Reads are served from the local SQLite archive, which makes them instant and keeps working
+when Telegram is unreachable. Only `sync_chat` and `send_message` touch the network, and
+the connection is opened lazily — a read-only session never dials Telegram at all.
+
+| Tool | What it does |
+|---|---|
+| `list_chats` | Find a chat: id, kind, message count, last activity |
+| `read_chat` | Messages of one chat, oldest-first, pageable with `before_id` |
+| `search_messages` | Substring search across the archive or one chat |
+| `archive_status` | Paths and counts |
+| `sync_chat` | Pull anything newer than the archive has, from Telegram |
+| `send_message` | Send as your account — **only exposed with `--allow-send`** |
+
+Sending is off by default, because an MCP server that can message your contacts is a
+different risk from one that can read a local database. Turn it on deliberately:
+
+```bash
+claude mcp add tg-archive -- tg-archive mcp --allow-send
+```
+
+`send_message` is annotated as destructive and open-world, so a well-behaved client asks
+before calling it.
 
 ## Configuration
 

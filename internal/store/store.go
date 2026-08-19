@@ -353,3 +353,66 @@ func nullable(s string) any {
 	}
 	return s
 }
+
+// Tail returns the newest messages of a chat, oldest-first for readability.
+func (s *Store) Tail(chatID int64, limit int) ([]Message, error) {
+	return s.query(
+		`SELECT `+msgCols+` FROM messages WHERE chat_id=?
+		 ORDER BY id DESC LIMIT ?`, chatID, limit)
+}
+
+// Before returns messages older than a given message id (for paging back).
+func (s *Store) Before(chatID int64, beforeID, limit int) ([]Message, error) {
+	return s.query(
+		`SELECT `+msgCols+` FROM messages WHERE chat_id=? AND id<?
+		 ORDER BY id DESC LIMIT ?`, chatID, beforeID, limit)
+}
+
+// Around returns messages surrounding a given message id, so a search hit has context.
+func (s *Store) Around(chatID int64, msgID, span int) ([]Message, error) {
+	return s.query(
+		`SELECT `+msgCols+` FROM messages WHERE chat_id=? AND id BETWEEN ? AND ?
+		 ORDER BY id DESC LIMIT ?`, chatID, msgID-span, msgID+span, span*2+1)
+}
+
+// Search does a substring match over message text, optionally within one chat.
+func (s *Store) Search(text string, chatID int64, limit int) ([]Message, error) {
+	if chatID != 0 {
+		return s.query(
+			`SELECT `+msgCols+` FROM messages WHERE chat_id=? AND text LIKE ? AND deleted=0
+			 ORDER BY id DESC LIMIT ?`, chatID, "%"+text+"%", limit)
+	}
+	return s.query(
+		`SELECT `+msgCols+` FROM messages WHERE text LIKE ? AND deleted=0
+		 ORDER BY date DESC LIMIT ?`, "%"+text+"%", limit)
+}
+
+const msgCols = `chat_id,id,date,month,sender_id,sender,out,text,IFNULL(reply_to,0),
+	IFNULL(media,''),IFNULL(fwd,''),IFNULL(edited,''),deleted`
+
+// query runs a message query and returns rows oldest-first regardless of SQL order.
+func (s *Store) query(q string, args ...any) ([]Message, error) {
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Message
+	for rows.Next() {
+		var m Message
+		var o, d int
+		if err := rows.Scan(&m.ChatID, &m.ID, &m.Date, &m.Month, &m.SenderID, &m.Sender, &o,
+			&m.Text, &m.ReplyTo, &m.Media, &m.Fwd, &m.Edited, &d); err != nil {
+			return nil, err
+		}
+		m.Out, m.Deleted = o == 1, d == 1
+		out = append(out, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+	return out, nil
+}

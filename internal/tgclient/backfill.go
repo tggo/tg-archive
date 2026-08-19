@@ -100,20 +100,7 @@ func (c *Client) Send(ctx context.Context, chatID int64, text string, replyTo in
 		if err != nil {
 			return err
 		}
-		req := &tg.MessagesSendMessageRequest{
-			Peer:     p,
-			Message:  text,
-			RandomID: time.Now().UnixNano(),
-		}
-		if replyTo > 0 {
-			req.SetReplyTo(&tg.InputReplyToMessage{ReplyToMsgID: replyTo})
-		}
-		upd, err := c.api.MessagesSendMessage(ctx, req)
-		if err != nil {
-			return err
-		}
-		c.absorb(upd, chatID)
-		if _, err := c.rd.Flush(); err != nil {
+		if _, err := c.sendOn(ctx, p, chatID, text, replyTo); err != nil {
 			return err
 		}
 		fmt.Println("Sent.")
@@ -121,19 +108,43 @@ func (c *Client) Send(ctx context.Context, chatID int64, text string, replyTo in
 	})
 }
 
-// absorb takes the just-sent message out of the server response and archives it.
-func (c *Client) absorb(upd tg.UpdatesClass, chatID int64) {
+// sendOn does the actual send on an open connection and returns the new message id.
+func (c *Client) sendOn(ctx context.Context, p tg.InputPeerClass, chatID int64, text string, replyTo int) (int, error) {
+	req := &tg.MessagesSendMessageRequest{
+		Peer:     p,
+		Message:  text,
+		RandomID: time.Now().UnixNano(),
+	}
+	if replyTo > 0 {
+		req.SetReplyTo(&tg.InputReplyToMessage{ReplyToMsgID: replyTo})
+	}
+	upd, err := c.api.MessagesSendMessage(ctx, req)
+	if err != nil {
+		return 0, err
+	}
+	id := c.absorb(upd, chatID)
+	if _, err := c.rd.Flush(); err != nil {
+		return id, err
+	}
+	return id, nil
+}
+
+// absorb takes the just-sent message out of the server response and archives it,
+// returning the new message id.
+func (c *Client) absorb(upd tg.UpdatesClass, chatID int64) int {
 	switch u := upd.(type) {
 	case *tg.Updates:
 		ents := peer.NewEntities(usersMap(u.Users), chatsMap(u.Chats), channelsMap(u.Chats))
+		id := 0
 		for _, up := range u.Updates {
 			switch v := up.(type) {
 			case *tg.UpdateNewMessage:
-				c.absorbMsg(v.Message, chatID, ents)
+				id = c.absorbMsg(v.Message, chatID, ents)
 			case *tg.UpdateNewChannelMessage:
-				c.absorbMsg(v.Message, chatID, ents)
+				id = c.absorbMsg(v.Message, chatID, ents)
 			}
 		}
+		return id
 	case *tg.UpdateShortSentMessage:
 		// Telegram economises here: no full Message comes back, so we assemble one.
 		row := store.Message{
@@ -144,13 +155,15 @@ func (c *Client) absorb(upd tg.UpdatesClass, chatID int64) {
 		}
 		_ = c.st.SaveMessage(row)
 		_ = c.st.BumpState(chatID, u.ID)
+		return u.ID
 	}
+	return 0
 }
 
-func (c *Client) absorbMsg(msg tg.MessageClass, chatID int64, ents peer.Entities) {
+func (c *Client) absorbMsg(msg tg.MessageClass, chatID int64, ents peer.Entities) int {
 	m, ok := msg.(*tg.Message)
 	if !ok {
-		return
+		return 0
 	}
 	id := markedID(m.PeerID)
 	if id == 0 {
@@ -158,6 +171,7 @@ func (c *Client) absorbMsg(msg tg.MessageClass, chatID int64, ents peer.Entities
 	}
 	_ = c.st.SaveMessage(describe(m, id, ents, c.selfID, c.cfg.Location()))
 	_ = c.st.BumpState(id, m.ID)
+	return m.ID
 }
 
 func usersMap(us []tg.UserClass) map[int64]*tg.User {

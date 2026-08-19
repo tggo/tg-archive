@@ -17,6 +17,8 @@ type Config struct {
 
 	OutDir   string `json:"out_dir"`
 	Timezone string `json:"timezone"`
+	// DBPathOverride keeps the database next to the archive instead of in the config dir.
+	DBPathOverride string `json:"db_path,omitempty"`
 
 	Private  bool `json:"private"`
 	Groups   bool `json:"groups"`
@@ -50,7 +52,12 @@ func Dir() string {
 
 func Path() string        { return filepath.Join(Dir(), "config.json") }
 func (c *Config) SessionPath() string { return filepath.Join(c.dir, "session.json") }
-func (c *Config) DBPath() string      { return filepath.Join(c.dir, "state.db") }
+func (c *Config) DBPath() string {
+	if c.DBPathOverride != "" {
+		return expandHome(c.DBPathOverride)
+	}
+	return filepath.Join(c.dir, "state.db")
+}
 func (c *Config) Location() *time.Location { return c.loc }
 
 func Default() *Config {
@@ -89,11 +96,19 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("unknown timezone %q: %w", c.Timezone, err)
 	}
 	c.loc = loc
-	if strings.HasPrefix(c.OutDir, "~/") {
-		home, _ := os.UserHomeDir()
-		c.OutDir = filepath.Join(home, c.OutDir[2:])
-	}
+	c.OutDir = expandHome(c.OutDir)
 	return c, nil
+}
+
+func expandHome(p string) string {
+	if !strings.HasPrefix(p, "~/") {
+		return p
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return p
+	}
+	return filepath.Join(home, p[2:])
 }
 
 // applyEnv lets environment variables override key fields (handy for CI and tests).
@@ -108,6 +123,9 @@ func (c *Config) applyEnv() {
 	}
 	if v := os.Getenv("TG_OUT_DIR"); v != "" {
 		c.OutDir = v
+	}
+	if v := os.Getenv("TG_DB"); v != "" {
+		c.DBPathOverride = v
 	}
 }
 

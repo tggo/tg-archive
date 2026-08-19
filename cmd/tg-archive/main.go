@@ -13,6 +13,7 @@ import (
 	"syscall"
 
 	"github.com/tggo/tg-archive/internal/config"
+	"github.com/tggo/tg-archive/internal/mcpserver"
 	"github.com/tggo/tg-archive/internal/render"
 	"github.com/tggo/tg-archive/internal/store"
 	"github.com/tggo/tg-archive/internal/tgclient"
@@ -31,6 +32,8 @@ const usage = `tg-archive %s — Markdown archive of your own Telegram
   tg-archive send --chat X --text "..." [--reply-to N]
   tg-archive rerender           rebuild every .md from the database
   tg-archive status             what the archive holds right now
+  tg-archive mcp [--allow-send] serve the archive to an MCP client over stdio
+                                (read-only unless --allow-send is passed)
   tg-archive import-telethon <StringSession>
                                 carry over a Telethon session instead of logging in again
   tg-archive version
@@ -64,6 +67,8 @@ func main() {
 		err = cmdRerender()
 	case "status":
 		err = cmdStatus()
+	case "mcp":
+		err = cmdMCP(ctx)
 	case "import-telethon":
 		err = cmdImportTelethon()
 	case "version", "--version", "-v":
@@ -230,6 +235,19 @@ func resolveChat(st *store.Store, q string) (int64, error) {
 		fmt.Fprintf(os.Stderr, "  %16d  %s\n", c.ID, c.Title)
 	}
 	return 0, fmt.Errorf("%d chats matched", len(found))
+}
+
+func cmdMCP(ctx context.Context) error {
+	fs := flag.NewFlagSet("mcp", flag.ExitOnError)
+	allowSend := fs.Bool("allow-send", false, "expose the send_message tool (off by default)")
+	_ = fs.Parse(os.Args[2:])
+
+	cfg, st, err := open()
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	return mcpserver.New(cfg, st, *allowSend).Run(ctx, version)
 }
 
 func cmdImportTelethon() error {
