@@ -12,22 +12,22 @@ func TestSaveMessageIsIdempotentAndUpdates(t *testing.T) {
 	}
 	defer st.Close()
 
-	m := Message{ChatID: 1, ID: 10, Date: "2026-08-19T09:00:00Z", Month: "2026-08", Sender: "a", Text: "перший"}
+	m := Message{ChatID: 1, ID: 10, Date: "2026-08-19T09:00:00Z", Month: "2026-08", Sender: "a", Text: "first"}
 	if err := st.SaveMessage(m); err != nil {
 		t.Fatal(err)
 	}
-	m.Text, m.Edited = "виправлений", "2026-08-19T09:05:00Z"
+	m.Text, m.Edited = "corrected", "2026-08-19T09:05:00Z"
 	if err := st.SaveMessage(m); err != nil {
 		t.Fatal(err)
 	}
 
 	n, _ := st.Count("messages")
 	if n != 1 {
-		t.Fatalf("повідомлень %d, хотіли 1 (upsert, не дубль)", n)
+		t.Fatalf("got %d messages, want 1 (upsert, not a duplicate)", n)
 	}
 	rows, _ := st.MessagesOfMonth(1, "2026-08")
-	if rows[0].Text != "виправлений" || rows[0].Edited == "" {
-		t.Fatalf("редагування не збереглося: %+v", rows[0])
+	if rows[0].Text != "corrected" || rows[0].Edited == "" {
+		t.Fatalf("edit was not persisted: %+v", rows[0])
 	}
 }
 
@@ -44,15 +44,15 @@ func TestStateTracksRangeAndBackfillFlag(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got.MinID != 10 || got.MaxID != 90 {
-		t.Fatalf("state = %+v, хотіли min 10 / max 90", got)
+		t.Fatalf("state = %+v, want min 10 / max 90", got)
 	}
 	if got.BackfillDone {
-		t.Error("backfill не мав бути позначений завершеним")
+		t.Error("backfill should not be marked done yet")
 	}
 	_ = st.SetBackfillDone(7)
 	got, _ = st.GetState(7)
 	if !got.BackfillDone {
-		t.Error("SetBackfillDone не спрацював")
+		t.Error("SetBackfillDone had no effect")
 	}
 }
 
@@ -67,6 +67,6 @@ func TestPeerRoundTrip(t *testing.T) {
 		t.Fatalf("Peer() = %+v, %v, %v", p, ok, err)
 	}
 	if _, ok, _ := st.Peer(42); ok {
-		t.Error("неіснуючий peer знайдено")
+		t.Error("found a peer that was never saved")
 	}
 }

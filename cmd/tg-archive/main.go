@@ -1,4 +1,4 @@
-// tg-archive — архівує твій власний Telegram у Markdown, майже в реальному часі.
+// Command tg-archive archives your own Telegram into Markdown, near real-time.
 package main
 
 import (
@@ -18,24 +18,24 @@ import (
 	"github.com/tggo/tg-archive/internal/tgclient"
 )
 
-var version = "dev" // підставляється лінкером при релізі
+var version = "dev" // set by the linker at release time
 
-const usage = `tg-archive %s — Markdown-архів твого Telegram
+const usage = `tg-archive %s — Markdown archive of your own Telegram
 
-  tg-archive setup              майстер: api_id/api_hash, куди писати, що архівувати
-  tg-archive login [--phone N]  вхід у Telegram (код приходить у застосунок)
-  tg-archive chats              список діалогів та їх id
+  tg-archive setup              wizard: api_id/api_hash, output dir, which chats
+  tg-archive login [--phone N]  sign in (the code arrives inside Telegram)
+  tg-archive chats              list dialogs and their ids
   tg-archive backfill [--limit N] [--force]
-                                вся історія; переривання не втрачає прогрес
-  tg-archive live               демон: нове/редаговане/видалене → .md за ~3с
+                                full history; interrupting it loses no progress
+  tg-archive live               daemon: new/edited/deleted → .md within ~3s
   tg-archive send --chat X --text "..." [--reply-to N]
-  tg-archive rerender           перебудувати всі .md з бази
-  tg-archive status             що вже в архіві
+  tg-archive rerender           rebuild every .md from the database
+  tg-archive status             what the archive holds right now
   tg-archive import-telethon <StringSession>
-                                перенести авторизацію з Telethon (без повторного логіну)
+                                carry over a Telethon session instead of logging in again
   tg-archive version
 
-Конфіг: %s
+Config: %s
 `
 
 func main() {
@@ -73,12 +73,12 @@ func main() {
 		os.Exit(2)
 	}
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "помилка:", err)
+		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
 }
 
-// open — спільний старт для команд, яким потрібні і конфіг, і база.
+// open is the shared startup for commands that need both config and database.
 func open() (*config.Config, *store.Store, error) {
 	cfg, err := config.Load()
 	if err != nil {
@@ -96,48 +96,48 @@ func cmdSetup() error {
 	cfg := config.Default()
 	if existing, err := config.Load(); err == nil {
 		cfg = existing
-		fmt.Println("Знайдено наявний конфіг — Enter лишає поточне значення.")
+		fmt.Println("Found an existing config — press Enter to keep the current value.")
 	}
 
 	fmt.Print(`
-Потрібні власні api_id / api_hash (у Telegram вони видаються на акаунт):
-  1. https://my.telegram.org → увійти за номером
-  2. API development tools → створити застосунок (будь-яка назва)
-  3. скопіювати api_id і api_hash
+You need your own api_id / api_hash (Telegram issues them per account):
+  1. https://my.telegram.org → sign in with your phone number
+  2. API development tools → create an application (any name)
+  3. copy api_id and api_hash
 
 `)
 	if v := ask(in, "api_id", fmt.Sprint(cfg.APIID)); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil {
-			return fmt.Errorf("api_id має бути числом: %w", err)
+			return fmt.Errorf("api_id must be a number: %w", err)
 		}
 		cfg.APIID = n
 	}
 	if v := ask(in, "api_hash", cfg.APIHash); v != "" {
 		cfg.APIHash = v
 	}
-	if v := ask(in, "куди писати архів", cfg.OutDir); v != "" {
+	if v := ask(in, "where to write the archive", cfg.OutDir); v != "" {
 		cfg.OutDir = v
 	}
-	if v := ask(in, "часова зона (напр. Europe/Kyiv або Local)", cfg.Timezone); v != "" {
+	if v := ask(in, "timezone (e.g. Europe/Kyiv or Local)", cfg.Timezone); v != "" {
 		cfg.Timezone = v
 	}
-	cfg.Private = askBool(in, "архівувати приватні чати", cfg.Private)
-	cfg.Groups = askBool(in, "архівувати групи", cfg.Groups)
-	cfg.Saved = askBool(in, "архівувати Saved Messages", cfg.Saved)
-	cfg.Channels = askBool(in, "архівувати канали (підписки)", cfg.Channels)
-	cfg.Bots = askBool(in, "архівувати чати з ботами", cfg.Bots)
+	cfg.Private = askBool(in, "archive private chats", cfg.Private)
+	cfg.Groups = askBool(in, "archive groups", cfg.Groups)
+	cfg.Saved = askBool(in, "archive Saved Messages", cfg.Saved)
+	cfg.Channels = askBool(in, "archive channels you follow", cfg.Channels)
+	cfg.Bots = askBool(in, "archive bot chats", cfg.Bots)
 
 	if err := cfg.Save(); err != nil {
 		return err
 	}
-	fmt.Printf("\nЗбережено: %s\nДалі: tg-archive login\n", config.Path())
+	fmt.Printf("\nSaved: %s\nNext: tg-archive login\n", config.Path())
 	return nil
 }
 
 func cmdLogin(ctx context.Context) error {
 	fs := flag.NewFlagSet("login", flag.ExitOnError)
-	phone := fs.String("phone", "", "номер телефону, напр. +380671234567")
+	phone := fs.String("phone", "", "phone number, e.g. +12025550123")
 	_ = fs.Parse(os.Args[2:])
 
 	cfg, st, err := open()
@@ -159,15 +159,15 @@ func cmdChats(ctx context.Context) error {
 		for _, d := range ds {
 			fmt.Printf("%16d  %-8s %s\n", d.ID, d.Kind, d.Title)
 		}
-		fmt.Printf("\nусього: %d\n", len(ds))
+		fmt.Printf("\ntotal: %d\n", len(ds))
 		return nil
 	})
 }
 
 func cmdBackfill(ctx context.Context) error {
 	fs := flag.NewFlagSet("backfill", flag.ExitOnError)
-	limit := fs.Int("limit", 0, "макс. повідомлень на чат за прохід (0 = без межі)")
-	force := fs.Bool("force", false, "перепройти навіть завершені чати")
+	limit := fs.Int("limit", 0, "max messages per chat in this pass (0 = no limit)")
+	force := fs.Bool("force", false, "re-walk chats already marked complete")
 	_ = fs.Parse(os.Args[2:])
 
 	cfg, st, err := open()
@@ -189,12 +189,12 @@ func cmdLive(ctx context.Context) error {
 
 func cmdSend(ctx context.Context) error {
 	fs := flag.NewFlagSet("send", flag.ExitOnError)
-	chat := fs.String("chat", "", "id, @username або частина назви чату")
-	text := fs.String("text", "", "текст повідомлення")
-	replyTo := fs.Int("reply-to", 0, "id повідомлення, на яке відповідаємо")
+	chat := fs.String("chat", "", "id, @username, or part of the chat title")
+	text := fs.String("text", "", "message text")
+	replyTo := fs.Int("reply-to", 0, "id of the message to reply to")
 	_ = fs.Parse(os.Args[2:])
 	if *chat == "" || *text == "" {
-		return fmt.Errorf("потрібні --chat і --text")
+		return fmt.Errorf("--chat and --text are both required")
 	}
 
 	cfg, st, err := open()
@@ -210,7 +210,7 @@ func cmdSend(ctx context.Context) error {
 	return tgclient.New(cfg, st).Send(ctx, id, *text, *replyTo)
 }
 
-// resolveChat приймає id або шматок назви й вимагає однозначності.
+// resolveChat accepts an id or a title fragment and insists on an unambiguous match.
 func resolveChat(st *store.Store, q string) (int64, error) {
 	if id, err := strconv.ParseInt(q, 10, 64); err == nil {
 		return id, nil
@@ -221,20 +221,20 @@ func resolveChat(st *store.Store, q string) (int64, error) {
 	}
 	switch len(found) {
 	case 0:
-		return 0, fmt.Errorf("чат %q не знайдено — спершу `tg-archive chats`", q)
+		return 0, fmt.Errorf("no chat matches %q — run `tg-archive chats` first", q)
 	case 1:
 		return found[0].ID, nil
 	}
-	fmt.Fprintln(os.Stderr, "неоднозначно, уточни:")
+	fmt.Fprintln(os.Stderr, "ambiguous, be more specific:")
 	for _, c := range found {
 		fmt.Fprintf(os.Stderr, "  %16d  %s\n", c.ID, c.Title)
 	}
-	return 0, fmt.Errorf("знайдено %d чатів", len(found))
+	return 0, fmt.Errorf("%d chats matched", len(found))
 }
 
 func cmdImportTelethon() error {
 	if len(os.Args) < 3 {
-		return fmt.Errorf("вкажи StringSession: tg-archive import-telethon 1BVtsO...")
+		return fmt.Errorf("pass the StringSession: tg-archive import-telethon 1BVtsO...")
 	}
 	cfg, err := config.Load()
 	if err != nil {
@@ -256,7 +256,7 @@ func cmdRerender() error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("перебудовано файлів: %d\n", n)
+	fmt.Printf("files rebuilt: %d\n", n)
 	return nil
 }
 
@@ -274,12 +274,12 @@ func cmdStatus() error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("архів:        %s\n", cfg.OutDir)
-	fmt.Printf("база:         %s\n", cfg.DBPath())
-	fmt.Printf("повідомлень:  %d\n", msgs)
-	fmt.Printf("чатів:        %d\n", len(rows))
+	fmt.Printf("archive:   %s\n", cfg.OutDir)
+	fmt.Printf("database:  %s\n", cfg.DBPath())
+	fmt.Printf("messages:  %d\n", msgs)
+	fmt.Printf("chats:     %d\n", len(rows))
 	if len(rows) > 0 {
-		fmt.Println("\nостанні:")
+		fmt.Println("\nmost recent:")
 		for i, c := range rows {
 			if i == 10 {
 				break

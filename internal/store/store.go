@@ -1,4 +1,4 @@
-// Package store — SQLite як джерело правди. Markdown завжди можна перебудувати з нього.
+// Package store is the SQLite source of truth. Markdown can always be rebuilt from it.
 package store
 
 import (
@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS dirty (
 );
 CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT);
 CREATE TABLE IF NOT EXISTS peers (
-    id          INTEGER PRIMARY KEY,   -- marked id (як у Telethon: user>0, chat<0, channel -100…)
+    id          INTEGER PRIMARY KEY,   -- marked id (Telethon style: user>0, chat<0, channel -100…)
     type        TEXT,                  -- user | chat | channel
     access_hash INTEGER,
     username    TEXT
@@ -68,7 +68,7 @@ type Message struct {
 	ChatID   int64
 	ID       int
 	Date     string // RFC3339 UTC
-	Month    string // YYYY-MM у локальній зоні
+	Month    string // YYYY-MM in the configured timezone
 	SenderID int64
 	Sender   string
 	Out      bool
@@ -93,7 +93,7 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(1) // modernc/sqlite + WAL: один writer уникає SQLITE_BUSY
+	db.SetMaxOpenConns(1) // modernc/sqlite + WAL: a single writer avoids SQLITE_BUSY
 	if _, err := db.Exec(schema); err != nil {
 		return nil, err
 	}
@@ -141,8 +141,8 @@ func (s *Store) MarkDeleted(chatID int64, msgID int) error {
 	return s.MarkDirty(chatID, month)
 }
 
-// FindChatByMessage знаходить чат за id повідомлення — потрібне для events.MessageDeleted,
-// які в приватних чатах приходять без вказівки peer.
+// FindChatByMessage locates the chat by message id — needed for delete updates, which in
+// private chats arrive without naming their peer.
 func (s *Store) FindChatByMessage(msgID int) (int64, bool, error) {
 	var chatID int64
 	err := s.db.QueryRow(`SELECT chat_id FROM messages WHERE id=? LIMIT 1`, msgID).Scan(&chatID)
@@ -238,7 +238,7 @@ func (s *Store) Chats() ([]Chat, error) {
 	return out, rows.Err()
 }
 
-// SearchChats — пошук чату за частиною назви або @username (для `send --chat`).
+// SearchChats finds a chat by title fragment or @username (for `send --chat`).
 func (s *Store) SearchChats(q string) ([]Chat, error) {
 	rows, err := s.db.Query(
 		`SELECT id,kind,title,IFNULL(username,''),IFNULL(slug,'') FROM chats
@@ -314,7 +314,7 @@ func (s *Store) Count(table string) (int, error) {
 	return n, err
 }
 
-// SavePeer запам'ятовує access_hash, без якого не можна ні писати, ні докачувати історію.
+// SavePeer records the access_hash, without which we can neither send nor fetch history.
 func (s *Store) SavePeer(id int64, typ string, accessHash int64, username string) error {
 	_, err := s.db.Exec(
 		`INSERT INTO peers(id,type,access_hash,username) VALUES(?,?,?,?)

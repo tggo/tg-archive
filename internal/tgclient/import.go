@@ -8,12 +8,12 @@ import (
 	"github.com/gotd/td/session"
 )
 
-// ImportTelethonSession переносить авторизацію з Telethon StringSession,
-// щоб при міграції з python-версії не логінитися вдруге.
+// ImportTelethonSession carries authorization over from a Telethon StringSession so a
+// migration does not require signing in again.
 func ImportTelethonSession(cfg sessionPathProvider, stringSession string) error {
 	data, err := session.TelethonSession(stringSession)
 	if err != nil {
-		return fmt.Errorf("не схоже на Telethon StringSession: %w", err)
+		return fmt.Errorf("does not look like a Telethon StringSession: %w", err)
 	}
 	var buf []byte
 	loader := session.Loader{Storage: &memStorage{out: &buf}}
@@ -23,13 +23,13 @@ func ImportTelethonSession(cfg sessionPathProvider, stringSession string) error 
 	if err := os.WriteFile(cfg.SessionPath(), buf, 0o600); err != nil {
 		return err
 	}
-	fmt.Printf("Сесію імпортовано у %s (DC %d)\n", cfg.SessionPath(), data.DC)
+	fmt.Printf("Session imported into %s (DC %d)\n", cfg.SessionPath(), data.DC)
 	return nil
 }
 
 type sessionPathProvider interface{ SessionPath() string }
 
-// memStorage ловить у пам'ять те, що session.Loader хоче записати.
+// memStorage captures whatever session.Loader wants to write.
 type memStorage struct{ out *[]byte }
 
 func (m *memStorage) LoadSession(_ context.Context) ([]byte, error) { return *m.out, nil }

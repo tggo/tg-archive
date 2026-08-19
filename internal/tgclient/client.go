@@ -1,4 +1,4 @@
-// Package tgclient — усе, що говорить з Telegram: авторизація, backfill, live, надсилання.
+// Package tgclient holds everything that talks to Telegram: auth, backfill, live, sending.
 package tgclient
 
 import (
@@ -37,7 +37,7 @@ type Client struct {
 
 func New(cfg *config.Config, st *store.Store) *Client {
 	c := &Client{cfg: cfg, st: st, rd: render.New(st, cfg.OutDir, cfg.Location())}
-	// floodwait сам пересиджує FLOOD_WAIT; ratelimit тримає темп нижче межі Telegram.
+	// floodwait sits out FLOOD_WAIT for us; ratelimit keeps the pace under Telegram's limit.
 	c.waiter = floodwait.NewWaiter().WithMaxRetries(6).WithMaxWait(10 * time.Minute)
 	opts := telegram.Options{
 		SessionStorage: &telegram.FileSessionStorage{Path: cfg.SessionPath()},
@@ -52,7 +52,7 @@ func New(cfg *config.Config, st *store.Store) *Client {
 	return c
 }
 
-// Run піднімає з'єднання і викликає fn; floodwait крутиться поруч.
+// Run brings the connection up and calls fn, with the floodwait waiter running alongside.
 func (c *Client) Run(ctx context.Context, fn func(ctx context.Context) error) error {
 	return c.waiter.Run(ctx, func(ctx context.Context) error {
 		return c.tg.Run(ctx, func(ctx context.Context) error {
@@ -62,7 +62,7 @@ func (c *Client) Run(ctx context.Context, fn func(ctx context.Context) error) er
 	})
 }
 
-// Authed виконує fn лише після успішної авторизації.
+// Authed runs fn only once the session is authorized.
 func (c *Client) Authed(ctx context.Context, fn func(ctx context.Context) error) error {
 	return c.Run(ctx, func(ctx context.Context) error {
 		status, err := c.tg.Auth().Status(ctx)
@@ -70,7 +70,7 @@ func (c *Client) Authed(ctx context.Context, fn func(ctx context.Context) error)
 			return err
 		}
 		if !status.Authorized {
-			return fmt.Errorf("не авторизовано — спершу `tg-archive login`")
+			return fmt.Errorf("not authorized — run `tg-archive login` first")
 		}
 		self, err := c.tg.Self(ctx)
 		if err != nil {
@@ -86,7 +86,7 @@ func (c *Client) Authed(ctx context.Context, fn func(ctx context.Context) error)
 
 func (c *Client) SelfID() int64 { return c.selfID }
 
-// Login проводить інтерактивну авторизацію (телефон → код → 2FA).
+// Login runs the interactive sign-in (phone -> code -> 2FA).
 func (c *Client) Login(ctx context.Context, phone string) error {
 	return c.Run(ctx, func(ctx context.Context) error {
 		status, err := c.tg.Auth().Status(ctx)
@@ -98,7 +98,7 @@ func (c *Client) Login(ctx context.Context, phone string) error {
 			if err != nil {
 				return err
 			}
-			fmt.Printf("Уже авторизовано: %s (id %d)\n", userName(self), self.ID)
+			fmt.Printf("Already authorized: %s (id %d)\n", userName(self), self.ID)
 			return nil
 		}
 		flow := auth.NewFlow(termAuth{phone: phone}, auth.SendCodeOptions{})
@@ -109,12 +109,12 @@ func (c *Client) Login(ctx context.Context, phone string) error {
 		if err != nil {
 			return err
 		}
-		fmt.Printf("Авторизовано: %s (id %d)\n", userName(self), self.ID)
+		fmt.Printf("Authorized: %s (id %d)\n", userName(self), self.ID)
 		return nil
 	})
 }
 
-// dialog — один чат, який ми архівуємо.
+// dialog is one chat we archive.
 type dialog struct {
 	id    int64
 	kind  string
@@ -122,7 +122,7 @@ type dialog struct {
 	peer  tg.InputPeerClass
 }
 
-// Dialogs проходить усі діалоги, зберігає їх у базу і повертає ті, що підпадають під конфіг.
+// Dialogs walks every dialog, stores them, and returns those the config allows.
 func (c *Client) Dialogs(ctx context.Context) ([]dialog, error) {
 	var out []dialog
 	iter := query.GetDialogs(c.api).BatchSize(100).Iter()
@@ -152,7 +152,7 @@ func (c *Client) Dialogs(ctx context.Context) ([]dialog, error) {
 	return out, iter.Err()
 }
 
-// describePeer витягує тип/назву/access_hash із сутностей, доданих до діалогу.
+// describePeer pulls kind/title/access_hash out of the entities attached to a dialog.
 func (c *Client) describePeer(e dialogs.Elem, id int64) (kind, title, username string, accessHash int64) {
 	switch p := e.Peer.(type) {
 	case *tg.InputPeerUser:
@@ -202,14 +202,14 @@ func peerType(p tg.InputPeerClass) string {
 	return "user"
 }
 
-// inputPeer відновлює InputPeer із збереженого access_hash.
+// inputPeer rebuilds an InputPeer from the stored access_hash.
 func (c *Client) inputPeer(id int64) (tg.InputPeerClass, error) {
 	p, ok, err := c.st.Peer(id)
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
-		return nil, fmt.Errorf("невідомий чат %d — запусти `tg-archive chats`, щоб оновити список", id)
+		return nil, fmt.Errorf("unknown chat %d — run `tg-archive chats` to refresh the list", id)
 	}
 	switch p.Type {
 	case "user":
@@ -222,25 +222,25 @@ func (c *Client) inputPeer(id int64) (tg.InputPeerClass, error) {
 	case "channel":
 		return &tg.InputPeerChannel{ChannelID: -id - 1000000000000, AccessHash: p.AccessHash}, nil
 	}
-	return nil, fmt.Errorf("невідомий тип peer %q", p.Type)
+	return nil, fmt.Errorf("unknown peer type %q", p.Type)
 }
 
-// termAuth питає телефон/код/пароль у терміналі.
+// termAuth asks for phone/code/password on the terminal.
 type termAuth struct{ phone string }
 
 func (a termAuth) Phone(_ context.Context) (string, error) {
 	if a.phone != "" {
 		return a.phone, nil
 	}
-	return prompt("Номер телефону (+380…): ")
+	return prompt("Phone number (+…): ")
 }
 
 func (a termAuth) Password(_ context.Context) (string, error) {
-	return promptSecret("Хмарний пароль (2FA): ")
+	return promptSecret("Cloud password (2FA): ")
 }
 
 func (a termAuth) Code(_ context.Context, _ *tg.AuthSentCode) (string, error) {
-	return prompt("Код із Telegram: ")
+	return prompt("Code from Telegram: ")
 }
 
 func (a termAuth) AcceptTermsOfService(_ context.Context, tos tg.HelpTermsOfService) error {
@@ -249,7 +249,7 @@ func (a termAuth) AcceptTermsOfService(_ context.Context, tos tg.HelpTermsOfServ
 }
 
 func (a termAuth) SignUp(_ context.Context) (auth.UserInfo, error) {
-	return auth.UserInfo{}, fmt.Errorf("реєстрація нового акаунта не підтримується")
+	return auth.UserInfo{}, fmt.Errorf("signing up a new account is not supported")
 }
 
 func prompt(label string) (string, error) {

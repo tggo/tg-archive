@@ -15,11 +15,11 @@ import (
 )
 
 const (
-	flushDebounce = 3 * time.Second  // скільки чекаємо тиші перед записом .md
-	resyncEvery   = 10 * time.Minute // страховка від загублених апдейтів
+	flushDebounce = 3 * time.Second  // quiet period before writing .md
+	resyncEvery   = 10 * time.Minute // backstop for updates that never arrive
 )
 
-// updatesEngine приймає апдейти й перетворює їх на записи в базі.
+// updatesEngine turns incoming updates into database rows.
 type updatesEngine struct {
 	c    *Client
 	gaps *updates.Manager
@@ -47,14 +47,14 @@ func (u *updatesEngine) handler() telegram.UpdateHandler { return u.gaps }
 func (u *updatesEngine) touch() {
 	select {
 	case u.pending <- struct{}{}:
-	default: // вже позначено, другий сигнал зайвий
+	default: // already flagged, a second signal adds nothing
 	}
 }
 
 func (u *updatesEngine) store(ents peer.Entities, msg tg.MessageClass) {
 	m, ok := msg.(*tg.Message)
 	if !ok {
-		return // службові повідомлення (MessageService) не архівуємо
+		return // service messages (MessageService) are not archived
 	}
 	chatID := markedID(m.PeerID)
 	if chatID == 0 {
@@ -63,7 +63,7 @@ func (u *updatesEngine) store(ents peer.Entities, msg tg.MessageClass) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 
-	// чат може бути новим — тоді визначаємо тип і вирішуємо, чи він нам потрібен
+	// the chat may be new: work out its kind and whether we want it at all
 	if _, err := u.c.st.Chat(chatID); err != nil {
 		kind, title, username := chatFromEntities(ents, m.PeerID, u.c.selfID)
 		if kind == "" || !u.c.cfg.Allowed(chatID, kind) {
@@ -105,7 +105,7 @@ func (u *updatesEngine) onEditChannel(ctx context.Context, e tg.Entities, up *tg
 	return nil
 }
 
-// onDelete: у приватних чатах апдейт не каже, з якого чату — шукаємо в базі за id.
+// onDelete: in private chats the update does not name the chat, so we look it up by id.
 func (u *updatesEngine) onDelete(ctx context.Context, e tg.Entities, up *tg.UpdateDeleteMessages) error {
 	u.mu.Lock()
 	defer u.mu.Unlock()
@@ -170,7 +170,7 @@ func chatFromEntities(ents peer.Entities, p tg.PeerClass, selfID int64) (kind, t
 	return "", "", ""
 }
 
-// Live тримає з'єднання, пише зміни у .md і періодично добирає пропущене.
+// Live holds the connection, writes changes to .md, and periodically picks up what it missed.
 func (c *Client) Live(ctx context.Context) error {
 	return c.Authed(ctx, func(ctx context.Context) error {
 		dialogs, err := c.Dialogs(ctx)
@@ -181,7 +181,7 @@ func (c *Client) Live(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		fmt.Printf("live: %s · чатів під наглядом: %d\n", userName(self), len(dialogs))
+		fmt.Printf("live: %s · chats watched: %d\n", userName(self), len(dialogs))
 
 		go c.writer(ctx)
 		go c.resyncLoop(ctx, dialogs)
@@ -192,7 +192,7 @@ func (c *Client) Live(ctx context.Context) error {
 	})
 }
 
-// writer збирає сплески апдейтів і перемальовує .md пачкою, а не по одному.
+// writer batches bursts of updates so .md is redrawn once, not per message.
 func (c *Client) writer(ctx context.Context) {
 	for {
 		select {
@@ -210,13 +210,13 @@ func (c *Client) writer(ctx context.Context) {
 				continue
 			}
 			if n > 0 {
-				fmt.Printf("%s записано файлів: %d\n", time.Now().Format("15:04:05"), n)
+				fmt.Printf("%s files written: %d\n", time.Now().Format("15:04:05"), n)
 			}
 		}
 	}
 }
 
-// resyncLoop добирає повідомлення, новіші за max_id, — на випадок загублених апдейтів.
+// resyncLoop pulls anything newer than max_id, in case an update was lost.
 func (c *Client) resyncLoop(ctx context.Context, dialogs []dialog) {
 	t := time.NewTicker(resyncEvery)
 	defer t.Stop()

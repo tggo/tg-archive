@@ -1,4 +1,4 @@
-// Package render малює Markdown із бази. .md — завжди похідне, ніколи не джерело.
+// Package render draws Markdown from the database. .md is always derived, never the source.
 package render
 
 import (
@@ -21,11 +21,11 @@ func New(st *store.Store, outDir string, loc *time.Location) *Renderer {
 	return &Renderer{st: st, outDir: outDir, loc: loc}
 }
 
-// Month перебудовує один файл chats/<slug>/<YYYY-MM>.md.
+// Month rebuilds a single chats/<slug>/<YYYY-MM>.md file.
 func (r *Renderer) Month(chatID int64, month string) (bool, error) {
 	chat, err := r.st.Chat(chatID)
 	if err != nil {
-		return false, nil // чат ще не відомий — нічого малювати
+		return false, nil // chat not known yet — nothing to draw
 	}
 	msgs, err := r.st.MessagesOfMonth(chatID, month)
 	if err != nil || len(msgs) == 0 {
@@ -60,7 +60,7 @@ func (r *Renderer) Month(chatID int64, month string) (bool, error) {
 	if err := os.WriteFile(tmp, []byte(strings.TrimRight(b.String(), "\n")+"\n"), 0o644); err != nil {
 		return false, err
 	}
-	return true, os.Rename(tmp, path) // атомарно: Obsidian ніколи не бачить半-файл
+	return true, os.Rename(tmp, path) // atomic: an editor never sees a half-written file
 }
 
 func line(m store.Message, t time.Time, byID map[int]store.Message) string {
@@ -74,19 +74,19 @@ func line(m store.Message, t time.Time, byID map[int]store.Message) string {
 			if s == "" {
 				s = target.Media
 			}
-			meta = append(meta, fmt.Sprintf("↳ у відповідь на «%s»", snippet(s, 60)))
+			meta = append(meta, fmt.Sprintf("↳ replying to “%s”", snippet(s, 60)))
 		} else {
-			meta = append(meta, fmt.Sprintf("↳ у відповідь на #%d", m.ReplyTo))
+			meta = append(meta, fmt.Sprintf("↳ replying to #%d", m.ReplyTo))
 		}
 	}
 	if m.Media != "" {
 		meta = append(meta, "["+m.Media+"]")
 	}
 	if m.Edited != "" {
-		meta = append(meta, "(ред.)")
+		meta = append(meta, "(edited)")
 	}
 	if m.Deleted {
-		meta = append(meta, "(ВИДАЛЕНО)")
+		meta = append(meta, "(DELETED)")
 	}
 
 	head := fmt.Sprintf("**%s** · **%s**", t.Format("15:04"), m.Sender)
@@ -108,7 +108,7 @@ func line(m store.Message, t time.Time, byID map[int]store.Message) string {
 	return head + fmt.Sprintf("  <!-- #%d -->", m.ID)
 }
 
-// Flush перемальовує всі «брудні» (чат, місяць) і повертає кількість файлів.
+// Flush redraws every dirty (chat, month) pair and returns how many files were written.
 func (r *Renderer) Flush() (int, error) {
 	dirty, err := r.st.TakeDirty()
 	if err != nil {
@@ -136,16 +136,16 @@ func (r *Renderer) Flush() (int, error) {
 	return n, nil
 }
 
-// Index пише index.md — таблицю чатів із кількістю повідомлень.
+// Index writes index.md — a table of chats with message counts.
 func (r *Renderer) Index() error {
 	rows, err := r.st.Summary()
 	if err != nil {
 		return err
 	}
 	var b strings.Builder
-	b.WriteString("---\ntags: [telegram, index]\n---\n\n# Telegram архів\n\n")
-	fmt.Fprintf(&b, "Оновлено: %s\n\n", time.Now().In(r.loc).Format("2006-01-02 15:04"))
-	b.WriteString("| Чат | Тип | Повідомлень | Останнє |\n|---|---|---:|---|\n")
+	b.WriteString("---\ntags: [telegram, index]\n---\n\n# Telegram archive\n\n")
+	fmt.Fprintf(&b, "Updated: %s\n\n", time.Now().In(r.loc).Format("2006-01-02 15:04"))
+	b.WriteString("| Chat | Type | Messages | Last |\n|---|---|---:|---|\n")
 	for _, c := range rows {
 		last := ""
 		if c.Last != "" {

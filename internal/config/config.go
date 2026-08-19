@@ -1,4 +1,4 @@
-// Package config тримає налаштування tg-archive: шляхи, api-ключі, фільтри чатів.
+// Package config holds tg-archive settings: paths, api credentials, chat filters.
 package config
 
 import (
@@ -31,14 +31,18 @@ type Config struct {
 	loc *time.Location
 }
 
-// Dir — ~/.config/tg-archive (або $TG_ARCHIVE_HOME).
+// Dir is ~/.config/tg-archive (or $XDG_CONFIG_HOME / $TG_ARCHIVE_HOME).
+// XDG is used on macOS too: CLI tools live in ~/.config, not "Application Support".
 func Dir() string {
 	if d := os.Getenv("TG_ARCHIVE_HOME"); d != "" {
 		return d
 	}
-	base, err := os.UserConfigDir()
-	if err != nil {
-		home, _ := os.UserHomeDir()
+	base := os.Getenv("XDG_CONFIG_HOME")
+	if base == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "tg-archive"
+		}
 		base = filepath.Join(home, ".config")
 	}
 	return filepath.Join(base, "tg-archive")
@@ -68,7 +72,7 @@ func Load() (*Config, error) {
 	b, err := os.ReadFile(Path())
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("немає конфігу %s — запусти `tg-archive setup`", Path())
+			return nil, fmt.Errorf("no config at %s — run `tg-archive setup`", Path())
 		}
 		return nil, err
 	}
@@ -78,11 +82,11 @@ func Load() (*Config, error) {
 	c.dir = Dir()
 	c.applyEnv()
 	if c.APIID == 0 || c.APIHash == "" {
-		return nil, fmt.Errorf("порожні api_id/api_hash у %s — див. `tg-archive setup`", Path())
+		return nil, fmt.Errorf("empty api_id/api_hash in %s — see `tg-archive setup`", Path())
 	}
 	loc, err := time.LoadLocation(c.Timezone)
 	if err != nil {
-		return nil, fmt.Errorf("невідома часова зона %q: %w", c.Timezone, err)
+		return nil, fmt.Errorf("unknown timezone %q: %w", c.Timezone, err)
 	}
 	c.loc = loc
 	if strings.HasPrefix(c.OutDir, "~/") {
@@ -92,7 +96,7 @@ func Load() (*Config, error) {
 	return c, nil
 }
 
-// applyEnv дозволяє перекрити ключові поля змінними середовища (зручно для CI/тестів).
+// applyEnv lets environment variables override key fields (handy for CI and tests).
 func (c *Config) applyEnv() {
 	if v := os.Getenv("TG_API_ID"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
@@ -118,7 +122,7 @@ func (c *Config) Save() error {
 	return os.WriteFile(Path(), append(b, '\n'), 0o600)
 }
 
-// Allowed каже, чи архівуємо цей чат, з урахуванням skip/only списків.
+// Allowed reports whether this chat is archived, honouring the skip/only lists.
 func (c *Config) Allowed(id int64, kind string) bool {
 	for _, s := range c.SkipIDs {
 		if s == id {

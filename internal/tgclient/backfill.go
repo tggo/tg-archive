@@ -16,12 +16,12 @@ import (
 type storeChat = store.Chat
 
 type fetchOpts struct {
-	OffsetID int // качати старіші за цей id
-	MinID    int // качати новіші за цей id
-	Limit    int // 0 = без обмеження
+	OffsetID int // fetch messages older than this id
+	MinID    int // stop once we reach this id (fetch only newer)
+	Limit    int // 0 means no limit
 }
 
-// fetch тягне історію одного чату й пише її в базу. Повертає кількість повідомлень.
+// fetch pulls one chat's history into the database and returns how many messages landed.
 func (c *Client) fetch(ctx context.Context, d dialog, opt fetchOpts) (int, error) {
 	b := query.Messages(c.api).GetHistory(d.peer).BatchSize(100)
 	if opt.OffsetID > 0 {
@@ -35,8 +35,8 @@ func (c *Client) fetch(ctx context.Context, d dialog, opt fetchOpts) (int, error
 		if !ok {
 			continue
 		}
-		// GetHistory уміє тільки offset_id (углиб); «новіші за X» робимо зупинкою ітерації,
-		// бо історія завжди йде від найновішого до найстарішого.
+		// GetHistory only understands offset_id (going back); "newer than X" is done by
+		// stopping early, since history always arrives newest-first.
 		if opt.MinID > 0 && msg.ID <= opt.MinID {
 			break
 		}
@@ -58,15 +58,15 @@ func (c *Client) fetch(ctx context.Context, d dialog, opt fetchOpts) (int, error
 	return n, iter.Err()
 }
 
-// Backfill проходить усі дозволені чати від найстарішого завантаженого вглиб історії.
-// Перерваний прохід продовжується з того ж місця.
+// Backfill walks every allowed chat from the oldest message it already has, further back.
+// An interrupted run resumes from the same place.
 func (c *Client) Backfill(ctx context.Context, limit int, force bool) error {
 	return c.Authed(ctx, func(ctx context.Context) error {
 		dialogs, err := c.Dialogs(ctx)
 		if err != nil {
 			return err
 		}
-		fmt.Printf("Діалогів до архівації: %d\n", len(dialogs))
+		fmt.Printf("Dialogs to archive: %d\n", len(dialogs))
 		for _, d := range dialogs {
 			st, err := c.st.GetState(d.id)
 			if err != nil {
@@ -93,7 +93,7 @@ func (c *Client) Backfill(ctx context.Context, limit int, force bool) error {
 	})
 }
 
-// Send надсилає повідомлення і одразу кладе його в архів.
+// Send posts a message and files it into the archive right away.
 func (c *Client) Send(ctx context.Context, chatID int64, text string, replyTo int) error {
 	return c.Authed(ctx, func(ctx context.Context) error {
 		p, err := c.inputPeer(chatID)
@@ -116,12 +116,12 @@ func (c *Client) Send(ctx context.Context, chatID int64, text string, replyTo in
 		if _, err := c.rd.Flush(); err != nil {
 			return err
 		}
-		fmt.Println("Надіслано.")
+		fmt.Println("Sent.")
 		return nil
 	})
 }
 
-// absorb дістає з відповіді сервера щойно надіслане повідомлення й архівує його.
+// absorb takes the just-sent message out of the server response and archives it.
 func (c *Client) absorb(upd tg.UpdatesClass, chatID int64) {
 	switch u := upd.(type) {
 	case *tg.Updates:
@@ -135,12 +135,12 @@ func (c *Client) absorb(upd tg.UpdatesClass, chatID int64) {
 			}
 		}
 	case *tg.UpdateShortSentMessage:
-		// Telegram economises: повний Message не приходить, збираємо його самі.
+		// Telegram economises here: no full Message comes back, so we assemble one.
 		row := store.Message{
 			ChatID: chatID, ID: u.ID,
 			Date:  time.Unix(int64(u.Date), 0).UTC().Format(time.RFC3339),
 			Month: time.Unix(int64(u.Date), 0).In(c.cfg.Location()).Format("2006-01"),
-			Out:   true, SenderID: c.selfID, Sender: "я",
+			Out:   true, SenderID: c.selfID, Sender: "me",
 		}
 		_ = c.st.SaveMessage(row)
 		_ = c.st.BumpState(chatID, u.ID)
@@ -190,14 +190,14 @@ func channelsMap(cs []tg.ChatClass) map[int64]*tg.Channel {
 	return out
 }
 
-// DialogInfo — публічний зріз діалогу для CLI.
+// DialogInfo is the public slice of a dialog for the CLI.
 type DialogInfo struct {
 	ID    int64
 	Kind  string
 	Title string
 }
 
-// WithDialogs оновлює список чатів у базі й віддає його викликачу.
+// WithDialogs refreshes the chat list in the database and hands it to the caller.
 func (c *Client) WithDialogs(ctx context.Context, fn func([]DialogInfo) error) error {
 	return c.Authed(ctx, func(ctx context.Context) error {
 		ds, err := c.Dialogs(ctx)

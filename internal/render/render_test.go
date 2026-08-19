@@ -49,18 +49,18 @@ func TestMonthRendersEditsRepliesAndDeletions(t *testing.T) {
 	got := string(b)
 	for _, want := range []string{
 		"chat: \"Анна\"", "## 2026-08-19",
-		"  привіт\n  як ти?",             // багаторядковий текст із відступом
-		"↳ у відповідь на «привіт як ти?»", // реплай підтягує текст цілі
-		"(ред.)", "[voice 12s]", "(ВИДАЛЕНО)",
+		"  привіт\n  як ти?", // multi-line text keeps its indent
+		"↳ replying to “привіт як ти?”", // reply pulls in the target text
+		"(edited)", "[voice 12s]", "(DELETED)",
 	} {
 		if !strings.Contains(got, want) {
-			t.Errorf("у файлі немає %q\n---\n%s", want, got)
+			t.Errorf("file is missing %q\n---\n%s", want, got)
 		}
 	}
 
-	// повторний Flush нічого не робить: dirty спорожнено
+	// a second Flush is a no-op: the dirty set was drained
 	if n, err := New(st, out, time.UTC).Flush(); err != nil || n != 0 {
-		t.Errorf("другий Flush() = %d, %v; хотіли 0", n, err)
+		t.Errorf("second Flush() = %d, %v; want 0", n, err)
 	}
 }
 
@@ -78,9 +78,9 @@ func TestIndexListsOnlyChatsWithMessages(t *testing.T) {
 	}
 	b, _ := os.ReadFile(filepath.Join(out, "index.md"))
 	if !strings.Contains(string(b), "З повідомленнями") {
-		t.Error("index.md не містить чат із повідомленнями")
+		t.Error("index.md is missing a chat that has messages")
 	}
 	if strings.Contains(string(b), "Порожній") {
-		t.Error("index.md показує чат без повідомлень")
+		t.Error("index.md lists a chat with no messages")
 	}
 }

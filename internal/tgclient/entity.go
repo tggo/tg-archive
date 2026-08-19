@@ -12,8 +12,8 @@ import (
 	"github.com/tggo/tg-archive/internal/store"
 )
 
-// markedID — та сама схема, що в Telethon: user > 0, chat < 0, channel -100…,
-// щоб бази обох реалізацій були взаємозамінні.
+// markedID uses the Telethon scheme (user > 0, chat < 0, channel -100…) so databases
+// from either implementation stay interchangeable.
 func markedID(p tg.PeerClass) int64 {
 	switch v := p.(type) {
 	case *tg.PeerUser:
@@ -31,7 +31,7 @@ func markedFromInput(p tg.InputPeerClass) int64 {
 	case *tg.InputPeerUser:
 		return v.UserID
 	case *tg.InputPeerSelf:
-		return 0 // підставляється викликачем
+		return 0 // filled in by the caller
 	case *tg.InputPeerChat:
 		return -v.ChatID
 	case *tg.InputPeerChannel:
@@ -50,7 +50,7 @@ var transliteration = map[rune]string{
 
 var nonSlug = regexp.MustCompile(`[^a-z0-9]+`)
 
-// slugify робить ASCII-ім'я теки: кирилиця транслітерується, id тримає унікальність.
+// slugify builds an ASCII folder name: Cyrillic is transliterated, the id keeps it unique.
 func slugify(name string, id int64) string {
 	var b strings.Builder
 	for _, r := range strings.ToLower(name) {
@@ -87,7 +87,7 @@ func userName(u *tg.User) string {
 	return fmt.Sprint(u.ID)
 }
 
-// peerName — людське ім'я за peer, наскільки дозволяють підвантажені сутності.
+// peerName resolves a human name for a peer, as far as the loaded entities allow.
 func peerName(ents peer.Entities, p tg.PeerClass) string {
 	switch v := p.(type) {
 	case *tg.PeerUser:
@@ -107,7 +107,7 @@ func peerName(ents peer.Entities, p tg.PeerClass) string {
 	return "?"
 }
 
-// describe перетворює tg.Message на рядок бази (без медіа-файлів — тільки маркер).
+// describe converts a tg.Message into a database row (no media files, just a marker).
 func describe(m *tg.Message, chatID int64, ents peer.Entities, selfID int64, loc *time.Location) store.Message {
 	date := time.Unix(int64(m.Date), 0).UTC()
 	row := store.Message{
@@ -124,7 +124,7 @@ func describe(m *tg.Message, chatID int64, ents peer.Entities, selfID int64, loc
 		row.SenderID = markedID(from)
 		row.Sender = peerName(ents, from)
 	} else {
-		// у приватних чатах from_id часто відсутній: автор — або я, або співрозмовник
+		// private chats often omit from_id: the author is either me or the other side
 		if m.Out {
 			row.SenderID = selfID
 			row.Sender = peerName(ents, &tg.PeerUser{UserID: selfID})
@@ -166,7 +166,7 @@ func mediaDesc(m *tg.Message) string {
 	}
 	switch v := media.(type) {
 	case *tg.MessageMediaWebPage:
-		return "" // прев'ю посилання — саме посилання вже є в тексті
+		return "" // link preview: the URL itself is already in the message text
 	case *tg.MessageMediaPhoto:
 		return "photo"
 	case *tg.MessageMediaGeo, *tg.MessageMediaGeoLive:
