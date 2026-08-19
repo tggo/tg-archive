@@ -169,7 +169,38 @@ rebuild every file at any time, with no internet:</p>
 marker like <code>[voice 12s]</code> or <code>[file report.pdf 2.1MB]</code>. That keeps
 years of chats down to tens of megabytes instead of hundreds of gigabytes.</div>
 
-<h2 id="claude">Part 4 — Let Claude use it</h2>
+<h2 id="search">Part 4 — Finding things</h2>
+
+<p>Search runs on a full-text index, so it is instant even on hundreds of thousands of
+messages, and it is not fooled by capital letters in Ukrainian, Russian or Greek — which
+plain substring search is.</p>
+<pre><code>tg-archive search "delivery address"
+tg-archive search "фундамент" --chat VABRAM --from 2026-01-01</code></pre>
+<p>Several words must all appear. <code>"in quotes"</code> is an exact phrase,
+<code>word*</code> matches a prefix, and you can narrow by <code>--chat</code>,
+<code>--sender</code>, <code>--from</code>, <code>--to</code>.</p>
+
+<h3>Photos, voice notes and files</h3>
+<p>By default only markers are stored. To keep the files themselves, set
+<code>"media": "small"</code> (or <code>"all"</code>) in the config and run:</p>
+<pre><code>tg-archive media</code></pre>
+<p>They land in <code>attachments/</code>, and the Markdown starts showing the picture
+inline in Obsidian instead of the word <code>[photo]</code>.</p>
+
+<h3>Is anything missing?</h3>
+<pre><code>tg-archive doctor          <span class="c"># what is missing</span>
+tg-archive doctor --fix    <span class="c"># fetch it</span></code></pre>
+<div class="note">It tells you two separate things: chats it never walked back to the very
+first message, and gaps inside supergroups and channels. It deliberately does <b>not</b>
+report gaps in private chats — Telegram numbers those messages per account, so a jump in
+numbering there means you wrote somewhere else in between, not that anything was lost.</div>
+
+<h3>A second account</h3>
+<pre><code>tg-archive --profile work setup
+tg-archive --profile work backfill</code></pre>
+<p>Separate settings, separate login, separate archive.</p>
+
+<h2 id="claude">Part 5 — Let Claude use it</h2>
 
 <p>The same program can act as an <b>MCP server</b>, which is how Claude connects to tools
 on your machine. One command:</p>
@@ -188,7 +219,7 @@ unless you pass that flag, and the tool is marked so Claude asks before using it
 <table>
 <tr><th>What Claude can do</th><th>Where the data comes from</th></tr>
 <tr><td><code>list_chats</code>, <code>read_chat</code>, <code>search_messages</code>, <code>archive_status</code></td><td>your local archive — instant, offline</td></tr>
-<tr><td><code>sync_chat</code></td><td>Telegram, to fetch anything newer</td></tr>
+<tr><td><code>sync_chat</code>, <code>download_media</code>, <code>check_archive</code></td><td>Telegram, to fetch what is new or missing</td></tr>
 <tr><td><code>send_message</code></td><td>Telegram — only with <code>--allow-send</code></td></tr>
 </table>
 
@@ -200,6 +231,9 @@ unless you pass that flag, and the tool is marked so Claude asks before using it
 <tr><td><code>tg-archive chats</code></td><td>List your chats and their ids</td></tr>
 <tr><td><code>tg-archive backfill</code></td><td>Pull history (resumable)</td></tr>
 <tr><td><code>tg-archive live</code></td><td>Watch for new messages</td></tr>
+<tr><td><code>tg-archive search "words"</code></td><td>Search the archive</td></tr>
+<tr><td><code>tg-archive media</code></td><td>Download attachments</td></tr>
+<tr><td><code>tg-archive doctor</code></td><td>Check for missing history</td></tr>
 <tr><td><code>tg-archive status</code></td><td>How much is archived</td></tr>
 <tr><td><code>tg-archive send --chat "Anna" --text "on my way"</code></td><td>Send a message</td></tr>
 <tr><td><code>tg-archive rerender</code></td><td>Rebuild all files from the database</td></tr>

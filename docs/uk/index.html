@@ -168,7 +168,38 @@ Homebrew прописує себе в <code>PATH</code> лише для нови
 позначка на кшталт <code>[voice 12s]</code> чи <code>[file zvit.pdf 2.1MB]</code>. Завдяки
 цьому роки листування важать десятки мегабайтів, а не сотні гігабайтів.</div>
 
-<h2 id="claude">Частина 4 — Підключити до Клода</h2>
+<h2 id="search">Частина 4 — Як знаходити</h2>
+
+<p>Пошук працює через повнотекстовий індекс: миттєвий навіть на сотнях тисяч повідомлень
+і не спотикається об великі літери в українській — на відміну від звичайного пошуку
+підрядка.</p>
+<pre><code>tg-archive search "адреса доставки"
+tg-archive search "фундамент" --chat VABRAM --from 2026-01-01</code></pre>
+<p>Усі слова мають зустрітися. <code>"у лапках"</code> — точна фраза, <code>слов*</code> —
+за початком слова, а звузити можна через <code>--chat</code>, <code>--sender</code>,
+<code>--from</code>, <code>--to</code>.</p>
+
+<h3>Фото, голосові та файли</h3>
+<p>За замовчуванням зберігаються лише позначки. Щоб тримати й самі файли, постав
+<code>"media": "small"</code> (або <code>"all"</code>) у конфізі й запусти:</p>
+<pre><code>tg-archive media</code></pre>
+<p>Вони лягають у <code>attachments/</code>, а в Markdown замість слова <code>[photo]</code>
+з'являється саме зображення — Obsidian показує його прямо в тексті.</p>
+
+<h3>Чи чогось не бракує?</h3>
+<pre><code>tg-archive doctor          <span class="c"># чого бракує</span>
+tg-archive doctor --fix    <span class="c"># дотягнути</span></code></pre>
+<div class="note">Він каже про дві різні речі: чати, які так і не дійшли до найпершого
+повідомлення, і прогалини всередині супергруп та каналів. І свідомо <b>не</b> шукає
+прогалин у приватних чатах — Telegram нумерує їхні повідомлення на акаунт, тож стрибок
+номера там означає лише, що між ними ти писав деінде, а не що щось загубилося.</div>
+
+<h3>Другий акаунт</h3>
+<pre><code>tg-archive --profile work setup
+tg-archive --profile work backfill</code></pre>
+<p>Окремі налаштування, окремий вхід, окремий архів.</p>
+
+<h2 id="claude">Частина 5 — Підключити до Клода</h2>
 
 <p>Та сама програма вміє працювати <b>MCP-сервером</b> — так Клод під'єднується до
 інструментів на твоїй машині. Одна команда:</p>
@@ -188,7 +219,7 @@ Homebrew прописує себе в <code>PATH</code> лише для нови
 <table>
 <tr><th>Що вміє Клод</th><th>Звідки бере дані</th></tr>
 <tr><td><code>list_chats</code>, <code>read_chat</code>, <code>search_messages</code>, <code>archive_status</code></td><td>локальний архів — миттєво, без мережі</td></tr>
-<tr><td><code>sync_chat</code></td><td>Telegram, щоб дотягнути свіже</td></tr>
+<tr><td><code>sync_chat</code>, <code>download_media</code>, <code>check_archive</code></td><td>Telegram, щоб дотягнути нове чи відсутнє</td></tr>
 <tr><td><code>send_message</code></td><td>Telegram — лише з <code>--allow-send</code></td></tr>
 </table>
 
@@ -200,6 +231,9 @@ Homebrew прописує себе в <code>PATH</code> лише для нови
 <tr><td><code>tg-archive chats</code></td><td>Показати чати та їх id</td></tr>
 <tr><td><code>tg-archive backfill</code></td><td>Витягти історію (можна переривати)</td></tr>
 <tr><td><code>tg-archive live</code></td><td>Стежити за новими повідомленнями</td></tr>
+<tr><td><code>tg-archive search "слова"</code></td><td>Пошук по архіву</td></tr>
+<tr><td><code>tg-archive media</code></td><td>Завантажити вкладення</td></tr>
+<tr><td><code>tg-archive doctor</code></td><td>Перевірити, чи не бракує історії</td></tr>
 <tr><td><code>tg-archive status</code></td><td>Скільки вже в архіві</td></tr>
 <tr><td><code>tg-archive send --chat "Анна" --text "вже їду"</code></td><td>Надіслати повідомлення</td></tr>
 <tr><td><code>tg-archive rerender</code></td><td>Перебудувати всі файли з бази</td></tr>
