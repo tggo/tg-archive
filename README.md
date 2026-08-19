@@ -2,6 +2,10 @@
 
 Archive **your own** Telegram into plain Markdown, near real-time. Reply from the CLI.
 
+**New here? Start with the [step-by-step guide](https://tggo.github.io/tg-archive/)** —
+it walks through Homebrew, getting your Telegram API keys, and the first run, assuming no
+terminal experience.
+
 Telegram's MTProto API is open and your messages are your data — this is a normal user
 client (like the desktop app), not a scrape. Signed with a Developer ID and notarized by
 Apple, so macOS runs it without a Gatekeeper fight.
