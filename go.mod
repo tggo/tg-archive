@@ -1,6 +1,6 @@
 module github.com/tggo/tg-archive
 
-go 1.25.0
+go 1.26
 
 require (
 	github.com/gotd/contrib v0.25.0
