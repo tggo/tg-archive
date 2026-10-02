@@ -174,6 +174,22 @@ Files land in `attachments/<chat>/` and the Markdown switches from `[photo]` to
 `![[attachments/anna-smith-428424641/352698.jpg]]`, which Obsidian renders inline. History
 comes first and files second on purpose: an interrupted download never costs you messages.
 
+To fetch only some attachments, narrow by chat kind and by type:
+
+```json
+"media": "all",
+"media_kinds": ["private"],
+"media_types": ["photo", "video", "voice"]
+```
+
+`media_kinds` takes `private`, `group`, `saved`, `channel`, `bot`; `media_types` takes
+`photo`, `video`, `voice`, `sticker`, `gif`, `file`. Leave either out for no restriction.
+
+While `media` is on, `tg-archive live` downloads too — a first pass shortly after start,
+then one after every resync — over the connection it already holds. Do not run a separate
+`tg-archive media` next to the daemon: two processes on one session risk
+`AUTH_KEY_DUPLICATED`, which invalidates the login.
+
 ## Use it from Claude (MCP)
 
 The same binary is an MCP server, so Claude can read your Telegram history, search it, and

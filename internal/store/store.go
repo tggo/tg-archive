@@ -630,16 +630,54 @@ func (s *Store) Unfinished() ([]ChatSummary, error) {
 	return out, rows.Err()
 }
 
+// MediaFilter narrows PendingMedia. ChatID 0, and empty Kinds/Types, mean "any".
+// Kinds are chat kinds (private/group/saved/channel/bot); Types are the marker words
+// mediaDesc writes: photo, video, voice, sticker, gif, file.
+type MediaFilter struct {
+	ChatID int64
+	Kinds  []string
+	Types  []string
+}
+
+// mediaTypePredicates maps a type name to the SQL that matches its marker: "photo" and
+// "gif" are bare words, the rest carry a duration/name/size after the word.
+var mediaTypePredicates = map[string]string{
+	"photo":   `m.media = 'photo'`,
+	"gif":     `m.media = 'gif'`,
+	"video":   `m.media LIKE 'video %'`,
+	"voice":   `m.media LIKE 'voice %'`,
+	"sticker": `m.media LIKE 'sticker%'`,
+	"file":    `m.media LIKE 'file%'`,
+}
+
 // PendingMedia lists archived messages that carry media but no downloaded file yet.
-func (s *Store) PendingMedia(chatID int64, limit int) ([]Message, error) {
-	q := `SELECT ` + msgCols + ` FROM messages
-	      WHERE media != '' AND media IS NOT NULL AND (file IS NULL OR file = '') AND deleted = 0`
+func (s *Store) PendingMedia(f MediaFilter, limit int) ([]Message, error) {
+	q := `SELECT ` + msgCols + ` FROM messages m
+	      WHERE m.media != '' AND m.media IS NOT NULL AND (m.file IS NULL OR m.file = '') AND m.deleted = 0`
 	args := []any{}
-	if chatID != 0 {
-		q += ` AND chat_id = ?`
-		args = append(args, chatID)
+	if f.ChatID != 0 {
+		q += ` AND m.chat_id = ?`
+		args = append(args, f.ChatID)
 	}
-	q += ` ORDER BY id DESC LIMIT ?`
+	if len(f.Kinds) > 0 {
+		q += ` AND m.chat_id IN (SELECT id FROM chats WHERE kind IN (?` + strings.Repeat(",?", len(f.Kinds)-1) + `))`
+		for _, k := range f.Kinds {
+			args = append(args, k)
+		}
+	}
+	if len(f.Types) > 0 {
+		var preds []string
+		for _, t := range f.Types {
+			if p, ok := mediaTypePredicates[t]; ok {
+				preds = append(preds, p)
+			}
+		}
+		if len(preds) == 0 {
+			return nil, nil // only unknown types asked for: nothing can match
+		}
+		q += ` AND (` + strings.Join(preds, " OR ") + `)`
+	}
+	q += ` ORDER BY m.id DESC LIMIT ?`
 	args = append(args, limit)
 	return s.query(q, args...)
 }

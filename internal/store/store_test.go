@@ -157,14 +157,14 @@ func TestPendingMediaAndSetFile(t *testing.T) {
 	_ = st.SaveMessage(Message{ChatID: 1, ID: 1, Date: "2026-08-19T09:00:00Z", Month: "2026-08", Sender: "x", Media: "photo"})
 	_ = st.SaveMessage(Message{ChatID: 1, ID: 2, Date: "2026-08-19T09:01:00Z", Month: "2026-08", Sender: "x", Text: "no media"})
 
-	pending, err := st.PendingMedia(0, 10)
+	pending, err := st.PendingMedia(MediaFilter{}, 10)
 	if err != nil || len(pending) != 1 || pending[0].ID != 1 {
 		t.Fatalf("PendingMedia = %d rows, %v; want just #1", len(pending), err)
 	}
 	if err := st.SetFile(1, 1, "attachments/a-1/1.jpg"); err != nil {
 		t.Fatal(err)
 	}
-	if again, _ := st.PendingMedia(0, 10); len(again) != 0 {
+	if again, _ := st.PendingMedia(MediaFilter{}, 10); len(again) != 0 {
 		t.Errorf("downloaded message still pending")
 	}
 	// re-saving the message (an edit, a resync) must not wipe the downloaded file
@@ -174,5 +174,49 @@ func TestPendingMediaAndSetFile(t *testing.T) {
 		if m.ID == 1 && m.File == "" {
 			t.Error("re-saving the message dropped the downloaded file path")
 		}
+	}
+}
+
+func TestPendingMediaFilters(t *testing.T) {
+	st, _ := Open(filepath.Join(t.TempDir(), "s.db"))
+	defer st.Close()
+	_ = st.UpsertChat(Chat{ID: 1, Kind: "private", Title: "A", Slug: "a-1"})
+	_ = st.UpsertChat(Chat{ID: 2, Kind: "group", Title: "G", Slug: "g-2"})
+	save := func(chat int64, id int, media string) {
+		_ = st.SaveMessage(Message{ChatID: chat, ID: id, Date: "2026-08-19T09:00:00Z", Month: "2026-08", Sender: "x", Media: media})
+	}
+	save(1, 1, "photo")
+	save(1, 2, "video 12s 3.4MB")
+	save(1, 3, "voice 5s")
+	save(1, 4, "sticker 😀")
+	save(1, 5, "file spec.pdf 2.1MB")
+	save(2, 6, "photo")
+
+	ids := func(f MediaFilter) []int {
+		rows, err := st.PendingMedia(f, 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []int
+		for _, r := range rows {
+			out = append(out, r.ID)
+		}
+		return out
+	}
+	if got := ids(MediaFilter{}); len(got) != 6 {
+		t.Fatalf("no filter: got %v, want all 6", got)
+	}
+	if got := ids(MediaFilter{Kinds: []string{"private"}}); len(got) != 5 {
+		t.Fatalf("kind=private: got %v, want 5 rows from chat 1", got)
+	}
+	got := ids(MediaFilter{Kinds: []string{"private"}, Types: []string{"photo", "video", "voice"}})
+	if len(got) != 3 || got[0] != 1 || got[1] != 2 || got[2] != 3 {
+		t.Fatalf("private photo/video/voice: got %v, want [1 2 3] (oldest-first)", got)
+	}
+	if got := ids(MediaFilter{ChatID: 2, Types: []string{"photo"}}); len(got) != 1 || got[0] != 6 {
+		t.Fatalf("chat 2 photo: got %v, want [6]", got)
+	}
+	if got := ids(MediaFilter{Types: []string{"gif"}}); len(got) != 0 {
+		t.Fatalf("gif: got %v, want none", got)
 	}
 }

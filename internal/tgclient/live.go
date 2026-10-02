@@ -15,8 +15,10 @@ import (
 )
 
 const (
-	flushDebounce = 3 * time.Second  // quiet period before writing .md
-	resyncEvery   = 10 * time.Minute // backstop for updates that never arrive
+	flushDebounce   = 3 * time.Second  // quiet period before writing .md
+	resyncEvery     = 10 * time.Minute // backstop for updates that never arrive
+	mediaFirstAfter = 30 * time.Second // let the update stream settle before the first download pass
+	mediaPerPass    = 500              // files per pass; the next pass picks up the rest
 )
 
 // updatesEngine turns incoming updates into database rows.
@@ -185,6 +187,7 @@ func (c *Client) Live(ctx context.Context) error {
 
 		go c.writer(ctx)
 		go c.resyncLoop(ctx, dialogs)
+		go c.mediaLoop(ctx)
 
 		return c.updates.gaps.Run(ctx, c.api, self.ID, updates.AuthOptions{
 			OnStart: func(ctx context.Context) {},
@@ -237,6 +240,35 @@ func (c *Client) resyncLoop(ctx context.Context, dialogs []dialog) {
 			if _, err := c.rd.Flush(); err != nil {
 				fmt.Fprintln(os.Stderr, "render:", err)
 			}
+		}
+	}
+}
+
+// mediaLoop fetches attachments for archived messages in the same connection the daemon
+// already holds — a second `tg-archive media` process would share the session and risk
+// AUTH_KEY_DUPLICATED. Runs once shortly after start, then after every resync interval.
+// Does nothing while "media" is "none".
+func (c *Client) mediaLoop(ctx context.Context) {
+	if c.cfg.MediaMaxBytes() < 0 {
+		return
+	}
+	first := time.NewTimer(mediaFirstAfter)
+	defer first.Stop()
+	t := time.NewTicker(resyncEvery)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-first.C:
+		case <-t.C:
+		}
+		got, skipped, err := c.DownloadMedia(ctx, 0, mediaPerPass)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "media:", err)
+		}
+		if got > 0 {
+			fmt.Printf("%s media downloaded: %d (skipped %d)\n", time.Now().Format("15:04:05"), got, skipped)
 		}
 	}
 }

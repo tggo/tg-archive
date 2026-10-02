@@ -208,6 +208,9 @@ func mediaDesc(m *tg.Message) string {
 	case *tg.MessageMediaDice:
 		return "dice"
 	case *tg.MessageMediaDocument:
+		if v.Document == nil {
+			return "file" // e.g. expired/paid media: the document itself is absent
+		}
 		doc, ok := v.Document.AsNotEmpty()
 		if !ok {
 			return "file"

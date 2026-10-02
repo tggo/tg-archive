@@ -2,11 +2,13 @@ package tgclient
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/gotd/td/telegram/downloader"
 	"github.com/gotd/td/tg"
@@ -23,6 +25,9 @@ func mediaLocation(m *tg.Message, maxBytes int64) (loc tg.InputFileLocationClass
 	}
 	switch v := media.(type) {
 	case *tg.MessageMediaPhoto:
+		if v.Photo == nil {
+			return nil, "", false
+		}
 		photo, ok := v.Photo.AsNotEmpty()
 		if !ok {
 			return nil, "", false
@@ -37,6 +42,9 @@ func mediaLocation(m *tg.Message, maxBytes int64) (loc tg.InputFileLocationClass
 		}, fmt.Sprintf("%d.jpg", m.ID), true
 
 	case *tg.MessageMediaDocument:
+		if v.Document == nil {
+			return nil, "", false
+		}
 		doc, ok := v.Document.AsNotEmpty()
 		if !ok {
 			return nil, "", false
@@ -116,6 +124,49 @@ func extFromMime(mime string) string {
 	return ".bin"
 }
 
+// downloadStall is how long a transfer may go without writing a byte before it is
+// abandoned. A storage DC that never answers shows as a file stuck at 0 bytes; a fixed
+// deadline would either cut off large videos or waste minutes on every stall.
+const downloadStall = 2 * time.Minute
+
+var errStalled = errors.New("no data for " + downloadStall.String())
+
+// downloadTo streams one file to disk, cancelling it if the file stops growing.
+func (c *Client) downloadTo(ctx context.Context, d *downloader.Downloader, loc tg.InputFileLocationClass, abs string) error {
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	go func() {
+		t := time.NewTicker(10 * time.Second)
+		defer t.Stop()
+		var last int64
+		since := time.Now()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				var size int64
+				if fi, err := os.Stat(abs); err == nil {
+					size = fi.Size()
+				}
+				if size != last {
+					last, since = size, time.Now()
+				} else if time.Since(since) >= downloadStall {
+					cancel(errStalled)
+					return
+				}
+			}
+		}
+	}()
+	if _, err := d.Download(c.api, loc).ToPath(ctx, abs); err != nil {
+		if context.Cause(ctx) == errStalled {
+			return errStalled
+		}
+		return err
+	}
+	return nil
+}
+
 // DownloadMedia fetches attachments that the archive has a record of but no file for.
 // It is deliberately a separate pass: history first (cheap, text), files later (expensive),
 // so an interrupted download never costs you the messages.
@@ -124,21 +175,39 @@ func (c *Client) DownloadMedia(ctx context.Context, chatID int64, limit int) (go
 	if maxBytes < 0 {
 		return 0, 0, fmt.Errorf(`media downloading is off — set "media" to "small" or "all" in the config`)
 	}
-	pending, err := c.st.PendingMedia(chatID, limit)
+	// the window grows with the dead list, so known-dead rows at the top of the newest-first
+	// order do not crowd out older ones that can still be fetched
+	pending, err := c.st.PendingMedia(store.MediaFilter{
+		ChatID: chatID, Kinds: c.cfg.MediaKinds, Types: c.cfg.MediaTypes,
+	}, limit+len(c.mediaDead))
 	if err != nil {
 		return 0, 0, err
 	}
 	d := downloader.NewDownloader()
 	for _, row := range pending {
-		msg, err := c.fetchMessage(ctx, row.ChatID, row.ID)
-		if err != nil || msg == nil {
-			skipped++
+		if got >= limit {
+			break
+		}
+		key := msgKey{row.ChatID, row.ID}
+		if _, dead := c.mediaDead[key]; dead {
 			continue
+		}
+		msg, err := c.fetchMessage(ctx, row.ChatID, row.ID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "  ! #%d in chat %d: %v\n", row.ID, row.ChatID, err)
+			skipped++
+			continue // transient (network, flood): try again next pass
+		}
+		if msg == nil {
+			c.mediaDead[key] = struct{}{}
+			skipped++
+			continue // gone from the server
 		}
 		loc, name, ok := mediaLocation(msg, maxBytes)
 		if !ok {
+			c.mediaDead[key] = struct{}{}
 			skipped++
-			continue
+			continue // nothing downloadable (expired, over the size limit, or a poll/location)
 		}
 		chat, err := c.st.Chat(row.ChatID)
 		if err != nil {
@@ -156,10 +225,13 @@ func (c *Client) DownloadMedia(ctx context.Context, chatID int64, limit int) (go
 			got++
 			continue
 		}
-		if _, err := d.Download(c.api, loc).ToPath(ctx, abs); err != nil {
+		if err := c.downloadTo(ctx, d, loc, abs); err != nil {
 			fmt.Fprintf(os.Stderr, "  ! %s #%d: %v\n", chat.Title, row.ID, err)
 			os.Remove(abs)
 			skipped++
+			if errors.Is(err, errStalled) {
+				c.mediaDead[key] = struct{}{} // leave it for the next restart
+			}
 			continue
 		}
 		if err := c.st.SetFile(row.ChatID, row.ID, rel); err != nil {

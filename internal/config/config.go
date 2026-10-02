@@ -21,8 +21,13 @@ type Config struct {
 	DBPathOverride string `json:"db_path,omitempty"`
 
 	// Media: "none" (markers only), "small" (up to MediaMaxMB), or "all".
-	Media     string `json:"media"`
-	MediaMaxMB int   `json:"media_max_mb,omitempty"`
+	Media      string `json:"media"`
+	MediaMaxMB int    `json:"media_max_mb,omitempty"`
+	// MediaKinds limits downloads to these chat kinds (private/group/saved/channel/bot);
+	// MediaTypes to these attachment types (photo/video/voice/sticker/gif/file).
+	// Empty means no restriction.
+	MediaKinds []string `json:"media_kinds,omitempty"`
+	MediaTypes []string `json:"media_types,omitempty"`
 
 	Private  bool `json:"private"`
 	Groups   bool `json:"groups"`
@@ -69,7 +74,7 @@ func baseDir() string {
 	return filepath.Join(base, "tg-archive")
 }
 
-func Path() string        { return filepath.Join(Dir(), "config.json") }
+func Path() string                    { return filepath.Join(Dir(), "config.json") }
 func (c *Config) SessionPath() string { return filepath.Join(c.dir, "session.json") }
 func (c *Config) DBPath() string {
 	if c.DBPathOverride != "" {

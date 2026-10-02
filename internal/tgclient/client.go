@@ -33,10 +33,21 @@ type Client struct {
 	waiter *floodwait.Waiter
 
 	updates *updatesEngine
+
+	// mediaDead remembers attachments Telegram no longer serves (expired, deleted), so a
+	// long-running daemon does not re-request them on every pass. In-memory on purpose:
+	// a restart gives them one more chance.
+	mediaDead map[msgKey]struct{}
+}
+
+type msgKey struct {
+	chat int64
+	id   int
 }
 
 func New(cfg *config.Config, st *store.Store) *Client {
-	c := &Client{cfg: cfg, st: st, rd: render.New(st, cfg.OutDir, cfg.Location())}
+	c := &Client{cfg: cfg, st: st, rd: render.New(st, cfg.OutDir, cfg.Location()),
+		mediaDead: map[msgKey]struct{}{}}
 	// floodwait sits out FLOOD_WAIT for us; ratelimit keeps the pace under Telegram's limit.
 	c.waiter = floodwait.NewWaiter().WithMaxRetries(6).WithMaxWait(10 * time.Minute)
 	opts := telegram.Options{
