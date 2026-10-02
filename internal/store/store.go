@@ -463,34 +463,73 @@ func (s *Store) Around(chatID int64, msgID, span int) ([]Message, error) {
 }
 
 // SearchOpts narrows a search. Zero values mean "no constraint".
+// Sort picks which slice of the matches comes back and in what order.
+const (
+	SortNewest    = "newest"    // the most recent Limit matches, shown in chat order
+	SortOldest    = "oldest"    // the earliest Limit matches, shown in chat order
+	SortRelevance = "relevance" // best matches first; needs words, else same as newest
+)
+
 type SearchOpts struct {
-	ChatID int64
-	From   string // YYYY-MM-DD, inclusive
-	To     string // YYYY-MM-DD, inclusive
-	Sender string
-	Limit  int
+	ChatID   int64
+	Kinds    []string // chat kinds (private/group/saved/channel/bot); empty means any
+	From     string   // YYYY-MM-DD, inclusive
+	To       string   // YYYY-MM-DD, inclusive
+	Sender   string   // substring of the display name as archived
+	SenderID int64    // exact; survives renames, unlike Sender
+	Sort     string   // one of the Sort* constants; "" means SortNewest
+	Limit    int
 }
 
-// Search runs a full-text query. FTS5 with unicode61 folds case for Cyrillic, which LIKE
-// does not, and it ranks by relevance instead of scanning every row.
-func (s *Store) Search(text string, o SearchOpts) ([]Message, error) {
-	q := `SELECT ` + msgColsM + `
-	      FROM messages_fts f JOIN messages m ON m.rowid = f.rowid
-	      WHERE messages_fts MATCH ? AND m.deleted=0`
-	args := []any{ftsQuery(text)}
+// where appends the option filters to q; every search path shares them.
+func (o SearchOpts) where(q string, args []any) (string, []any) {
 	if o.ChatID != 0 {
 		q += ` AND m.chat_id=?`
 		args = append(args, o.ChatID)
+	}
+	if len(o.Kinds) > 0 {
+		q += ` AND m.chat_id IN (SELECT id FROM chats WHERE kind IN (?` + strings.Repeat(",?", len(o.Kinds)-1) + `))`
+		for _, k := range o.Kinds {
+			args = append(args, k)
+		}
 	}
 	if o.Sender != "" {
 		q += ` AND m.sender LIKE ?`
 		args = append(args, "%"+o.Sender+"%")
 	}
-	q, args = withDates(q, args, "m.", o.From, o.To)
-	q += ` ORDER BY m.date DESC LIMIT ?`
-	args = append(args, o.Limit)
+	if o.SenderID != 0 {
+		q += ` AND m.sender_id=?`
+		args = append(args, o.SenderID)
+	}
+	return withDates(q, args, "m.", o.From, o.To)
+}
 
-	msgs, err := s.query(q, args...)
+// run finishes a search query with ORDER BY/LIMIT for o.Sort and returns the rows in
+// display order. ranked says whether the query exposes FTS5's rank column.
+func (s *Store) run(q string, args []any, o SearchOpts, ranked bool) ([]Message, error) {
+	switch {
+	case o.Sort == SortRelevance && ranked:
+		return s.rows(q+` ORDER BY f.rank LIMIT ?`, append(args, o.Limit)...)
+	case o.Sort == SortOldest:
+		return s.rows(q+` ORDER BY m.date ASC LIMIT ?`, append(args, o.Limit)...)
+	default:
+		return s.query(q+` ORDER BY m.date DESC LIMIT ?`, append(args, o.Limit)...)
+	}
+}
+
+// Search runs a full-text query. FTS5 with unicode61 folds case for Cyrillic, which LIKE
+// does not, and it ranks by relevance instead of scanning every row.
+// Empty text skips the index and returns whatever the filters alone select.
+func (s *Store) Search(text string, o SearchOpts) ([]Message, error) {
+	if strings.TrimSpace(text) == "" {
+		q, args := o.where(`SELECT `+msgColsM+` FROM messages m WHERE m.deleted=0`, nil)
+		return s.run(q, args, o, false)
+	}
+	q, args := o.where(`SELECT `+msgColsM+`
+	      FROM messages_fts f JOIN messages m ON m.rowid = f.rowid
+	      WHERE messages_fts MATCH ? AND m.deleted=0`, []any{ftsQuery(text)})
+
+	msgs, err := s.run(q, args, o, true)
 	if err == nil || !isFTSSyntaxErr(err) {
 		return msgs, err
 	}
@@ -500,17 +539,9 @@ func (s *Store) Search(text string, o SearchOpts) ([]Message, error) {
 }
 
 func (s *Store) searchLike(text string, o SearchOpts) ([]Message, error) {
-	q := `SELECT ` + msgColsM + ` FROM messages m
-	      WHERE m.text LIKE ? AND m.deleted=0`
-	args := []any{"%" + text + "%"}
-	if o.ChatID != 0 {
-		q += ` AND m.chat_id=?`
-		args = append(args, o.ChatID)
-	}
-	q, args = withDates(q, args, "m.", o.From, o.To)
-	q += ` ORDER BY m.date DESC LIMIT ?`
-	args = append(args, o.Limit)
-	return s.query(q, args...)
+	q, args := o.where(`SELECT `+msgColsM+` FROM messages m
+	      WHERE m.text LIKE ? AND m.deleted=0`, []any{"%" + text + "%"})
+	return s.run(q, args, o, false)
 }
 
 // Range returns messages of a chat between two dates (inclusive), oldest-first.
@@ -703,6 +734,18 @@ const msgColsM = `m.chat_id,m.id,m.date,m.month,m.sender_id,m.sender,m.out,m.tex
 
 // query runs a message query and returns rows oldest-first regardless of SQL order.
 func (s *Store) query(q string, args ...any) ([]Message, error) {
+	out, err := s.rows(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+	return out, nil
+}
+
+// rows runs a message query and returns rows in SQL order.
+func (s *Store) rows(q string, args ...any) ([]Message, error) {
 	rows, err := s.db.Query(q, args...)
 	if err != nil {
 		return nil, err
@@ -721,9 +764,6 @@ func (s *Store) query(q string, args ...any) ([]Message, error) {
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
-	}
-	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
-		out[i], out[j] = out[j], out[i]
 	}
 	return out, nil
 }
