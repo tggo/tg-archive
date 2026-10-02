@@ -37,6 +37,13 @@ CREATE TABLE IF NOT EXISTS messages (
     PRIMARY KEY (chat_id, id)
 );
 CREATE INDEX IF NOT EXISTS idx_msg_month ON messages(chat_id, month);
+-- chat summaries (MAX(date) per chat), date-ordered search and Range all walk this
+CREATE INDEX IF NOT EXISTS idx_msg_chat_date ON messages(chat_id, date);
+-- delete updates in private chats name only the message id
+CREATE INDEX IF NOT EXISTS idx_msg_id ON messages(id);
+-- the media queue: small, because almost every row either has no media or has its file
+CREATE INDEX IF NOT EXISTS idx_msg_pending_media ON messages(id)
+    WHERE media IS NOT NULL AND media != '' AND (file IS NULL OR file = '') AND deleted = 0;
 CREATE TABLE IF NOT EXISTS state (
     chat_id       INTEGER PRIMARY KEY,
     min_id        INTEGER,
@@ -63,7 +70,7 @@ END;
 CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
     INSERT INTO messages_fts(messages_fts, rowid, text) VALUES ('delete', old.rowid, old.text);
 END;
-CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE ON messages BEGIN
+CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE OF text ON messages BEGIN
     INSERT INTO messages_fts(messages_fts, rowid, text) VALUES ('delete', old.rowid, old.text);
     INSERT INTO messages_fts(rowid, text) VALUES (new.rowid, new.text);
 END;
@@ -117,17 +124,29 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1) // modernc/sqlite + WAL: a single writer avoids SQLITE_BUSY
-	if err := migrate(db); err != nil {
-		return nil, err
-	}
-	if _, err := db.Exec(schema); err != nil {
-		return nil, err
-	}
 	st := &Store{db: db}
-	if err := st.ensureFTS(); err != nil {
+	if err := st.init(path); err != nil {
+		db.Close()
 		return nil, err
 	}
 	return st, nil
+}
+
+func (s *Store) init(path string) error {
+	if err := migrate(s.db); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(schema); err != nil {
+		return err
+	}
+	// The database holds every message; SQLite creates it with the umask default, which
+	// is world-readable when db_path points somewhere outside the private config dir.
+	for _, f := range []string{path, path + "-wal", path + "-shm"} {
+		if err := os.Chmod(f, 0o600); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return s.ensureFTS()
 }
 
 // migrate adds columns that older databases lack, before the schema (and its triggers)
@@ -166,6 +185,16 @@ func migrate(db *sql.DB) error {
 			if _, err := db.Exec(`ALTER TABLE messages ADD COLUMN ` + col + ` TEXT`); err != nil {
 				return err
 			}
+		}
+	}
+	// The update trigger used to fire on every column, re-tokenizing the text on each
+	// SetFile and MarkDeleted. CREATE TRIGGER IF NOT EXISTS will not replace it, so drop
+	// the old one and let the schema recreate it as AFTER UPDATE OF text.
+	var trig string
+	err = db.QueryRow(`SELECT sql FROM sqlite_master WHERE type='trigger' AND name='messages_au'`).Scan(&trig)
+	if err == nil && !strings.Contains(trig, "UPDATE OF text") {
+		if _, err := db.Exec(`DROP TRIGGER messages_au`); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -249,7 +278,10 @@ func (s *Store) MarkDeleted(chatID int64, msgID int) error {
 // private chats arrive without naming their peer.
 func (s *Store) FindChatByMessage(msgID int) (int64, bool, error) {
 	var chatID int64
-	err := s.db.QueryRow(`SELECT chat_id FROM messages WHERE id=? LIMIT 1`, msgID).Scan(&chatID)
+	// Only private chats and basic groups share this per-account id space; a channel's
+	// message 1234 is a different message and must never be the one marked deleted.
+	err := s.db.QueryRow(`SELECT chat_id FROM messages WHERE id=? AND chat_id > -1000000000000
+	                      ORDER BY chat_id LIMIT 1`, msgID).Scan(&chatID)
 	if err == sql.ErrNoRows {
 		return 0, false, nil
 	}
@@ -265,6 +297,17 @@ func (s *Store) BumpState(chatID int64, msgID int) error {
 	_, err := s.db.Exec(
 		`INSERT INTO state(chat_id,min_id,max_id) VALUES(?,?,?)
 		 ON CONFLICT(chat_id) DO UPDATE SET min_id=MIN(min_id,excluded.min_id), max_id=MAX(max_id,excluded.max_id)`,
+		chatID, msgID, msgID)
+	return err
+}
+
+// BumpMax records a message seen outside backfill (live updates, our own sends). It must
+// not lower min_id: backfill resumes from min_id, so an edit to a year-old message would
+// otherwise make it skip everything between that message and the real frontier.
+func (s *Store) BumpMax(chatID int64, msgID int) error {
+	_, err := s.db.Exec(
+		`INSERT INTO state(chat_id,min_id,max_id) VALUES(?,?,?)
+		 ON CONFLICT(chat_id) DO UPDATE SET max_id=MAX(max_id,excluded.max_id)`,
 		chatID, msgID, msgID)
 	return err
 }

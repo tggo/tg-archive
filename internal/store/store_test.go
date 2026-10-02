@@ -296,3 +296,27 @@ func TestSearchKindFilterAndSort(t *testing.T) {
 		t.Errorf("relevance without words returned %v, want [3 4]", ids(h))
 	}
 }
+
+func TestFindChatByMessageSkipsChannels(t *testing.T) {
+	st, _ := Open(filepath.Join(t.TempDir(), "s.db"))
+	defer st.Close()
+	// same id in a channel (per-channel ids) and a private chat (per-account ids)
+	_ = st.SaveMessage(Message{ChatID: -1001234567890, ID: 77, Date: "2026-08-19T09:00:00Z", Month: "2026-08", Sender: "c"})
+	_ = st.SaveMessage(Message{ChatID: 5, ID: 77, Date: "2026-08-19T09:00:00Z", Month: "2026-08", Sender: "p"})
+	if id, ok, err := st.FindChatByMessage(77); err != nil || !ok || id != 5 {
+		t.Fatalf("FindChatByMessage(77) = %d, %v, %v; want the private chat 5", id, ok, err)
+	}
+}
+
+func TestBumpMaxKeepsBackfillFrontier(t *testing.T) {
+	st, _ := Open(filepath.Join(t.TempDir(), "s.db"))
+	defer st.Close()
+	_ = st.BumpState(1, 500) // backfill has reached down to #500
+	_ = st.BumpState(1, 900)
+	_ = st.BumpMax(1, 10) // a live edit of an ancient message
+	_ = st.BumpMax(1, 950)
+	s, _ := st.GetState(1)
+	if s.MinID != 500 || s.MaxID != 950 {
+		t.Fatalf("state = %+v, want min 500 (unchanged) and max 950", s)
+	}
+}

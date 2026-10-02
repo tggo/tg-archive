@@ -2,16 +2,22 @@
 package render
 
 import (
+	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/tggo/tg-archive/internal/store"
 )
 
 type Renderer struct {
+	// mu serialises Flush and Index: the live writer, the resync loop and the media loop
+	// all flush, and two renders of one month must not race to the same rename.
+	mu     sync.Mutex
 	st     *store.Store
 	outDir string
 	loc    *time.Location
@@ -21,11 +27,17 @@ func New(st *store.Store, outDir string, loc *time.Location) *Renderer {
 	return &Renderer{st: st, outDir: outDir, loc: loc}
 }
 
+// errNoChat means messages exist for a chat whose row has not been saved yet.
+var errNoChat = errors.New("chat not known yet")
+
 // Month rebuilds a single chats/<slug>/<YYYY-MM>.md file.
 func (r *Renderer) Month(chatID int64, month string) (bool, error) {
 	chat, err := r.st.Chat(chatID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, errNoChat
+	}
 	if err != nil {
-		return false, nil // chat not known yet — nothing to draw
+		return false, err
 	}
 	msgs, err := r.st.MessagesOfMonth(chatID, month)
 	if err != nil || len(msgs) == 0 {
@@ -56,11 +68,35 @@ func (r *Renderer) Month(chatID int64, month string) (bool, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return false, err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, []byte(strings.TrimRight(b.String(), "\n")+"\n"), 0o644); err != nil {
-		return false, err
+	return true, writeAtomic(path, strings.TrimRight(b.String(), "\n")+"\n")
+}
+
+// writeAtomic replaces path in one rename, so an editor never sees a half-written file.
+// The temp name is unique per call and synced first: a fixed ".tmp" let two writers
+// interleave, and an unsynced rename can leave an empty file after a power loss.
+func writeAtomic(path, content string) error {
+	f, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return err
 	}
-	return true, os.Rename(tmp, path) // atomic: an editor never sees a half-written file
+	tmp := f.Name()
+	_, err = f.WriteString(content)
+	if err == nil {
+		err = f.Sync()
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Chmod(tmp, 0o644)
+	}
+	if err == nil {
+		err = os.Rename(tmp, path)
+	}
+	if err != nil {
+		os.Remove(tmp)
+	}
+	return err
 }
 
 func line(m store.Message, t time.Time, byID map[int]store.Message) string {
@@ -117,35 +153,55 @@ func line(m store.Message, t time.Time, byID map[int]store.Message) string {
 }
 
 // Flush redraws every dirty (chat, month) pair and returns how many files were written.
+//
+// The dirty mark is cleared before a month is drawn, not after: a message saved while it
+// renders then marks it dirty again and the next Flush picks it up. Clearing afterwards
+// silently dropped that change. A month that fails keeps its mark and does not stop the
+// others from being drawn.
 func (r *Renderer) Flush() (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	dirty, err := r.st.TakeDirty()
 	if err != nil {
 		return 0, err
 	}
 	n := 0
+	var errs []error
 	for _, d := range dirty {
 		chatID, month := d[0].(int64), d[1].(string)
+		if err := r.st.ClearDirty(chatID, month); err != nil {
+			return n, err
+		}
 		ok, err := r.Month(chatID, month)
 		if err != nil {
-			return n, err
+			if merr := r.st.MarkDirty(chatID, month); merr != nil {
+				return n, merr
+			}
+			if !errors.Is(err, errNoChat) { // the chat row usually lands moments later
+				errs = append(errs, fmt.Errorf("chat %d %s: %w", chatID, month, err))
+			}
+			continue
 		}
 		if ok {
 			n++
 		}
-		if err := r.st.ClearDirty(chatID, month); err != nil {
-			return n, err
-		}
 	}
 	if n > 0 {
-		if err := r.Index(); err != nil {
-			return n, err
+		if err := r.index(); err != nil {
+			errs = append(errs, err)
 		}
 	}
-	return n, nil
+	return n, errors.Join(errs...)
 }
 
 // Index writes index.md — a table of chats with message counts.
 func (r *Renderer) Index() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.index()
+}
+
+func (r *Renderer) index() error {
 	rows, err := r.st.Summary()
 	if err != nil {
 		return err
@@ -165,7 +221,7 @@ func (r *Renderer) Index() error {
 	if err := os.MkdirAll(r.outDir, 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(r.outDir, "index.md"), []byte(b.String()), 0o644)
+	return writeAtomic(filepath.Join(r.outDir, "index.md"), b.String())
 }
 
 func parseTime(s string) time.Time {
