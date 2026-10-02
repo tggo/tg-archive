@@ -107,8 +107,10 @@ func documentName(doc *tg.Document, msgID int) string {
 		return fmt.Sprintf("%d%s", msgID, ext)
 	}
 	name = unsafeName.ReplaceAllString(name, "_")
-	if len(name) > 80 {
-		name = name[len(name)-80:]
+	// trim by runes: cutting a Cyrillic name mid-character gives invalid UTF-8, which
+	// APFS refuses to create
+	if r := []rune(name); len(r) > 80 {
+		name = string(r[len(r)-80:])
 	}
 	// The message id keeps two files of the same name from colliding.
 	return fmt.Sprintf("%d-%s", msgID, name)
@@ -139,7 +141,11 @@ const downloadStall = 2 * time.Minute
 var errStalled = errors.New("no data for " + downloadStall.String())
 
 // downloadTo streams one file to disk, cancelling it if the file stops growing.
+// It writes to abs+".part" and renames on success: the "already on disk" check in
+// DownloadMedia trusts any file at abs, so a crash mid-transfer must not leave one there.
 func (c *Client) downloadTo(ctx context.Context, d *downloader.Downloader, loc tg.InputFileLocationClass, abs string) error {
+	part := abs + ".part"
+	defer os.Remove(part) // no-op after a successful rename
 	ctx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
 	go func() {
@@ -153,7 +159,7 @@ func (c *Client) downloadTo(ctx context.Context, d *downloader.Downloader, loc t
 				return
 			case <-t.C:
 				var size int64
-				if fi, err := os.Stat(abs); err == nil {
+				if fi, err := os.Stat(part); err == nil {
 					size = fi.Size()
 				}
 				if size != last {
@@ -165,13 +171,13 @@ func (c *Client) downloadTo(ctx context.Context, d *downloader.Downloader, loc t
 			}
 		}
 	}()
-	if _, err := d.Download(c.api, loc).ToPath(ctx, abs); err != nil {
+	if _, err := d.Download(c.api, loc).ToPath(ctx, part); err != nil {
 		if context.Cause(ctx) == errStalled {
 			return errStalled
 		}
 		return err
 	}
-	return nil
+	return os.Rename(part, abs)
 }
 
 // DownloadMedia fetches attachments that the archive has a record of but no file for.
@@ -182,6 +188,10 @@ func (c *Client) DownloadMedia(ctx context.Context, chatID int64, limit int) (go
 	if maxBytes < 0 {
 		return 0, 0, fmt.Errorf(`media downloading is off — set "media" to "small" or "all" in the config`)
 	}
+	// one pass at a time: the live daemon's media loop and an MCP download_media call
+	// share this client, its dead list and the files on disk
+	c.mediaMu.Lock()
+	defer c.mediaMu.Unlock()
 	// the window grows with the dead list, so known-dead rows at the top of the newest-first
 	// order do not crowd out older ones that can still be fetched
 	pending, err := c.st.PendingMedia(store.MediaFilter{
@@ -192,7 +202,7 @@ func (c *Client) DownloadMedia(ctx context.Context, chatID int64, limit int) (go
 	}
 	d := downloader.NewDownloader()
 	for _, row := range pending {
-		if got >= limit {
+		if got >= limit || ctx.Err() != nil {
 			break
 		}
 		key := msgKey{row.ChatID, row.ID}
@@ -233,11 +243,18 @@ func (c *Client) DownloadMedia(ctx context.Context, chatID int64, limit int) (go
 			continue
 		}
 		if err := c.downloadTo(ctx, d, loc, abs); err != nil {
+			if ctx.Err() != nil {
+				break // shutting down, not a failed file
+			}
 			fmt.Fprintf(os.Stderr, "  ! %s #%d: %v\n", chat.Title, row.ID, err)
-			os.Remove(abs)
 			skipped++
+			// A stall can also be a long FLOOD_WAIT sleeping inside the transfer, so one
+			// stall is not proof the DC is dead: give it another pass before giving up.
 			if errors.Is(err, errStalled) {
-				c.mediaDead[key] = struct{}{} // leave it for the next restart
+				c.mediaStalls[key]++
+				if c.mediaStalls[key] >= 2 {
+					c.mediaDead[key] = struct{}{} // leave it for the next restart
+				}
 			}
 			continue
 		}

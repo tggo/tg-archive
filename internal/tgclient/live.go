@@ -81,7 +81,7 @@ func (u *updatesEngine) store(ents peer.Entities, msg tg.MessageClass) {
 		fmt.Fprintln(os.Stderr, "save:", err)
 		return
 	}
-	if err := u.c.st.BumpState(chatID, m.ID); err != nil {
+	if err := u.c.st.BumpMax(chatID, m.ID); err != nil {
 		fmt.Fprintln(os.Stderr, "state:", err)
 	}
 	u.touch()

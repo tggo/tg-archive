@@ -6,8 +6,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/gotd/td/telegram/query"
 	"github.com/gotd/td/telegram/message/peer"
+	"github.com/gotd/td/telegram/query"
 	"github.com/gotd/td/tg"
 
 	"github.com/tggo/tg-archive/internal/store"
@@ -122,7 +122,7 @@ func (c *Client) sendOn(ctx context.Context, p tg.InputPeerClass, chatID int64, 
 	if err != nil {
 		return 0, err
 	}
-	id := c.absorb(upd, chatID)
+	id := c.absorb(upd, chatID, text, replyTo)
 	if _, err := c.rd.Flush(); err != nil {
 		return id, err
 	}
@@ -131,7 +131,7 @@ func (c *Client) sendOn(ctx context.Context, p tg.InputPeerClass, chatID int64, 
 
 // absorb takes the just-sent message out of the server response and archives it,
 // returning the new message id.
-func (c *Client) absorb(upd tg.UpdatesClass, chatID int64) int {
+func (c *Client) absorb(upd tg.UpdatesClass, chatID int64, text string, replyTo int) int {
 	switch u := upd.(type) {
 	case *tg.Updates:
 		ents := peer.NewEntities(usersMap(u.Users), chatsMap(u.Chats), channelsMap(u.Chats))
@@ -146,15 +146,18 @@ func (c *Client) absorb(upd tg.UpdatesClass, chatID int64) int {
 		}
 		return id
 	case *tg.UpdateShortSentMessage:
-		// Telegram economises here: no full Message comes back, so we assemble one.
+		// Telegram economises here: no full Message comes back, so we assemble one from
+		// what we sent. Our own session never gets an UpdateNewMessage for it, and resync
+		// only fetches ids above max_id, so without the text it would stay blank for good.
 		row := store.Message{
 			ChatID: chatID, ID: u.ID,
 			Date:  time.Unix(int64(u.Date), 0).UTC().Format(time.RFC3339),
 			Month: time.Unix(int64(u.Date), 0).In(c.cfg.Location()).Format("2006-01"),
 			Out:   true, SenderID: c.selfID, Sender: "me",
+			Text: text, ReplyTo: replyTo,
 		}
-		_ = c.st.SaveMessage(row)
-		_ = c.st.BumpState(chatID, u.ID)
+		c.keep(c.st.SaveMessage(row))
+		c.keep(c.st.BumpMax(chatID, u.ID))
 		return u.ID
 	}
 	return 0
@@ -169,9 +172,17 @@ func (c *Client) absorbMsg(msg tg.MessageClass, chatID int64, ents peer.Entities
 	if id == 0 {
 		id = chatID
 	}
-	_ = c.st.SaveMessage(describe(m, id, ents, c.selfID, c.cfg.Location()))
-	_ = c.st.BumpState(id, m.ID)
+	c.keep(c.st.SaveMessage(describe(m, id, ents, c.selfID, c.cfg.Location())))
+	c.keep(c.st.BumpMax(id, m.ID))
 	return m.ID
+}
+
+// keep reports an archive write that failed after a send: the message is already out, so
+// failing the send would be wrong, but a silent gap in the archive is worse.
+func (c *Client) keep(err error) {
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "archive the sent message:", err)
+	}
 }
 
 func usersMap(us []tg.UserClass) map[int64]*tg.User {
