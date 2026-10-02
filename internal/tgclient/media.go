@@ -82,6 +82,8 @@ func largestPhotoSize(p *tg.Photo) (string, int64) {
 
 var unsafeName = regexp.MustCompile(`[^\p{L}\p{N}._-]+`)
 
+var safeExt = regexp.MustCompile(`^[a-z0-9+-]{1,10}$`)
+
 func documentName(doc *tg.Document, msgID int) string {
 	name, ext := "", ""
 	for _, a := range doc.Attributes {
@@ -115,7 +117,12 @@ func documentName(doc *tg.Document, msgID int) string {
 func extFromMime(mime string) string {
 	switch {
 	case strings.HasPrefix(mime, "image/"):
-		return "." + strings.TrimPrefix(mime, "image/")
+		// The mime type comes from whoever sent the file, so "image/../../x" must not
+		// become a path: keep only a short alphanumeric subtype.
+		if sub := strings.TrimPrefix(mime, "image/"); safeExt.MatchString(sub) {
+			return "." + sub
+		}
+		return ".img"
 	case strings.HasPrefix(mime, "video/"):
 		return ".mp4"
 	case strings.HasPrefix(mime, "audio/"):
