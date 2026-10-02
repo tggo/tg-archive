@@ -161,7 +161,28 @@ func (c *Config) Save() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(Path(), append(b, '\n'), 0o600)
+	// Temp file plus rename: a crash mid-write must not truncate the only copy of the
+	// api_hash. CreateTemp makes it 0600, and the rename also replaces any config that an
+	// older version or a hand edit left world-readable.
+	f, err := os.CreateTemp(c.dir, ".config.*.json")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	_, err = f.Write(append(b, '\n'))
+	if err == nil {
+		err = f.Sync()
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Rename(tmp, Path())
+	}
+	if err != nil {
+		os.Remove(tmp)
+	}
+	return err
 }
 
 // MediaMaxBytes is the size ceiling for downloads: 0 means no ceiling, -1 means media

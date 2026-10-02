@@ -8,6 +8,7 @@ package mcpserver
 import (
 	"context"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -104,7 +105,12 @@ func (s *Server) Run(ctx context.Context, version string) error {
 		return err
 	}
 
-	return srv.Run(ctx, &mcp.StdioTransport{})
+	// stdout is the JSON-RPC stream. Hand the transport the real stdout and point
+	// os.Stdout at stderr, so progress lines printed by sync or media code (which also
+	// serves the CLI) can never land in the protocol and break the client's connection.
+	out := os.Stdout
+	os.Stdout = os.Stderr
+	return srv.Run(ctx, &mcp.IOTransport{Reader: os.Stdin, Writer: out})
 }
 
 func ptr[T any](v T) *T { return &v }
