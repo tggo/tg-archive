@@ -2,12 +2,14 @@ package tgclient
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
 	"time"
 
 	"github.com/gotd/td/telegram"
+	"github.com/gotd/td/telegram/auth"
 	"github.com/gotd/td/telegram/message/peer"
 	"github.com/gotd/td/telegram/updates"
 	"github.com/gotd/td/tg"
@@ -172,26 +174,51 @@ func chatFromEntities(ents peer.Entities, p tg.PeerClass, selfID int64) (kind, t
 	return "", "", ""
 }
 
+// errSessionLost stops the daemon when Telegram stops accepting the session (401: the
+// key was revoked, the session was terminated from another device, or a re-login
+// replaced it). Before this existed, a dead session left the daemon running: every
+// resync logged AUTH_KEY_UNREGISTERED once per chat, launchd saw a live process, and
+// the archive silently stopped growing for two weeks. Exiting instead hands the problem
+// to launchd's KeepAlive: each restart fails fast in Authed with "not authorized" until
+// `tg-archive login` is run, and then the next restart resumes and fills the gap.
+var errSessionLost = errors.New("telegram session is no longer authorized — run `tg-archive login`")
+
+// sessionLost reports whether err means the session itself is dead, not one chat.
+func sessionLost(err error) bool { return err != nil && auth.IsUnauthorized(err) }
+
 // Live holds the connection, writes changes to .md, and periodically picks up what it missed.
 func (c *Client) Live(ctx context.Context) error {
-	return c.Authed(ctx, func(ctx context.Context) error {
-		dialogs, err := c.Dialogs(ctx)
-		if err != nil {
-			return err
+	return c.Authed(ctx, func(parent context.Context) error {
+		ctx, stop := context.WithCancelCause(parent)
+		defer stop(nil)
+		err := c.live(ctx, stop)
+		if errors.Is(context.Cause(ctx), errSessionLost) {
+			return errSessionLost
 		}
-		self, err := c.tg.Self(ctx)
-		if err != nil {
-			return err
+		if sessionLost(err) {
+			return fmt.Errorf("%w: %v", errSessionLost, err)
 		}
-		fmt.Printf("live: %s · chats watched: %d\n", userName(self), len(dialogs))
+		return err
+	})
+}
 
-		go c.writer(ctx)
-		go c.resyncLoop(ctx, dialogs)
-		go c.mediaLoop(ctx)
+func (c *Client) live(ctx context.Context, stop context.CancelCauseFunc) error {
+	dialogs, err := c.Dialogs(ctx)
+	if err != nil {
+		return err
+	}
+	self, err := c.tg.Self(ctx)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("live: %s · chats watched: %d\n", userName(self), len(dialogs))
 
-		return c.updates.gaps.Run(ctx, c.api, self.ID, updates.AuthOptions{
-			OnStart: func(ctx context.Context) {},
-		})
+	go c.writer(ctx)
+	go c.resyncLoop(ctx, stop, dialogs)
+	go c.mediaLoop(ctx, stop)
+
+	return c.updates.gaps.Run(ctx, c.api, self.ID, updates.AuthOptions{
+		OnStart: func(ctx context.Context) {},
 	})
 }
 
@@ -220,7 +247,7 @@ func (c *Client) writer(ctx context.Context) {
 }
 
 // resyncLoop pulls anything newer than max_id, in case an update was lost.
-func (c *Client) resyncLoop(ctx context.Context, dialogs []dialog) {
+func (c *Client) resyncLoop(ctx context.Context, stop context.CancelCauseFunc, dialogs []dialog) {
 	t := time.NewTicker(resyncEvery)
 	defer t.Stop()
 	for {
@@ -234,6 +261,10 @@ func (c *Client) resyncLoop(ctx context.Context, dialogs []dialog) {
 					continue
 				}
 				if _, err := c.fetch(ctx, d, fetchOpts{MinID: st.MaxID}); err != nil {
+					if sessionLost(err) {
+						stop(errSessionLost)
+						return
+					}
 					fmt.Fprintln(os.Stderr, "resync:", d.title, err)
 				}
 			}
@@ -248,7 +279,7 @@ func (c *Client) resyncLoop(ctx context.Context, dialogs []dialog) {
 // already holds — a second `tg-archive media` process would share the session and risk
 // AUTH_KEY_DUPLICATED. Runs once shortly after start, then after every resync interval.
 // Does nothing while "media" is "none".
-func (c *Client) mediaLoop(ctx context.Context) {
+func (c *Client) mediaLoop(ctx context.Context, stop context.CancelCauseFunc) {
 	if c.cfg.MediaMaxBytes() < 0 {
 		return
 	}
@@ -264,6 +295,10 @@ func (c *Client) mediaLoop(ctx context.Context) {
 		case <-t.C:
 		}
 		got, skipped, err := c.DownloadMedia(ctx, 0, mediaPerPass)
+		if sessionLost(err) {
+			stop(errSessionLost)
+			return
+		}
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "media:", err)
 		}
